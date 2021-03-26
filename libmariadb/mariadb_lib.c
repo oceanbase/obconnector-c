@@ -3949,7 +3949,7 @@ mysql_get_server_name(MYSQL *mysql)
   if (mysql->options.extension &&
       mysql->options.extension->db_driver != NULL)
     return mysql->options.extension->db_driver->name;
-  return mariadb_connection(mysql) ? "MariaDB" : "MySQL";
+  return mariadb_connection(mysql) ? "MariaDB" : "obclient";
 }
 
 static my_socket mariadb_get_socket(MYSQL *mysql)
