@@ -144,7 +144,7 @@ struct st_mariadb_methods MARIADB_DEFAULT_METHODS;
 #define IS_CONNHDLR_ACTIVE(mysql)\
   ((mysql)->extension && (mysql)->extension->conn_hdlr)
 
-// static void end_server(MYSQL *mysql);
+static void end_server(MYSQL *mysql);
 static void mysql_close_memory(MYSQL *mysql);
 void read_user_name(char *name);
 my_bool STDCALL mariadb_reconnect(MYSQL *mysql);
@@ -152,60 +152,6 @@ static int cli_report_progress(MYSQL *mysql, uchar *packet, uint length);
 
 extern int mysql_client_plugin_init();
 extern void mysql_client_plugin_deinit();
-
-#include "ob_oralce_format_models.h"
-
-
-#define EXT_NLS_DATE_FORMAT(M) \
-  (NULL != (M) ? (MYSQL_EXTENSION_PTR(M)->nls_date_format) : NULL)
-#define EXT_NLS_TIMESTAMP_FORMAT(M) \
-  (NULL != (M) ? (MYSQL_EXTENSION_PTR(M)->nls_timestamp_format) : NULL)
-#define EXT_NLS_TIMESTAMP_TZ_FORMAT(M) \
-  (NULL != (M) ? (MYSQL_EXTENSION_PTR(M)->nls_timestamp_tz_format) : NULL)
-
-/*
-  MYSQL::extension handling (see sql_common.h for declaration
-  of st_mysql_extension structure).
-*/
-
-MYSQL_EXTENSION* mysql_extension_init(MYSQL *mysql  __attribute__((unused)))
-{
-  MYSQL_EXTENSION *ext;
-  const char *nls_date_format = "YYYY-MM-DD HH24:MI:SS";
-  const char *nls_timestamp_format = "YYYY-MM-DD HH24:MI:SS.FF";
-  const char *nls_timestamp_tz_format = "YYYY-MM-DD HH24:MI:SS.FF TZR TZD";
-
-  ext= malloc(sizeof(MYSQL_EXTENSION));
-  memcpy(ext->nls_date_format, nls_date_format, strlen(nls_date_format));
-  memcpy(ext->nls_timestamp_format, nls_timestamp_format, strlen(nls_timestamp_format));
-  memcpy(ext->nls_timestamp_tz_format, nls_timestamp_tz_format, strlen(nls_timestamp_tz_format));
-  return ext;
-}
-
-
-void mysql_extension_free(struct st_mysql_extension* ext)
-{
-  if (!ext)
-    return;
-
-  if (ext->mysql) {
-    mysql_close(ext->mysql);
-  }
-
-  // if (ext->complex_type_hash) {
-  //   my_hash_free(ext->complex_type_hash);
-  //   my_free(ext->complex_type_hash);
-  // }
-
-  // if (ext->trace_data)
-  //   my_free(ext->trace_data);
-
-  // // free state change related resources.
-  // free_state_change_info(ext);
-
-  free(ext);
-}
-
 
 /* net_get_error */
 void net_get_error(char *buf, size_t buf_len,
@@ -541,7 +487,7 @@ int ma_multi_command(MYSQL *mysql, enum enum_multi_status status)
   }
 }
 
-void free_old_query(MYSQL *mysql)
+static void free_old_query(MYSQL *mysql)
 {
   if (mysql->fields)
     ma_free_root(&mysql->field_alloc,MYF(0));
@@ -600,7 +546,8 @@ void read_user_name(char *name)
 /**************************************************************************
 ** Shut down connection
 **************************************************************************/
-void
+
+static void
 end_server(MYSQL *mysql)
 {
   /* if net->error 2 and reconnect is activated, we need to inforn
@@ -959,12 +906,9 @@ unpack_fields(const MYSQL *mysql,
     p+= 2;
     field->decimals= (uint) p[0];
     p++;
-    //use the filler to support oracle precision
-    field->precision=  (uint) p[0];
-    p++;
-    field->ob_routine_param_inout= (enum ObRoutineParamInOut) (p[0] & 0x3);
-    field->is_implicit_rowid= (p[0] & 0x4) > 0 ? TRUE : FALSE;
-    p++;
+
+    /* filler */
+    p+= 2;
 
     if (INTERNAL_NUM_FIELD(field))
       field->flags|= NUM_FLAG;
@@ -989,478 +933,8 @@ error:
   ma_free_root(alloc, MYF(0));
   return(0);
 }
-/* Read all rows (data) from server */
-static const char digits[]= "0123456789abcdef";
 
-char *my_safe_ultoa(int base, ulong val, char *buf, uint length, my_bool need_zero)
-{
-  char *start = buf;
 
-  if (length <= 0) {
-    return NULL;
-  }
-
-  buf = start + length - 1;
-  do {
-    *buf--= digits[val % base];
-  } while ((val /= base) != 0 && buf >= start);
-
-  while (need_zero && buf >= start) {
-    *buf--= '0';
-  }
-
-  return buf + 1;
-}
-
-char *my_safe_ltoa(int base, long val, char *buf, uint length, my_bool need_zero)
-{
-  const my_bool is_neg= (val < 0);
-
-  if (length <= 1) {
-    return NULL;
-  }
-
-  if (is_neg) {
-    val= -val;
-  }
-
-  buf = my_safe_ultoa(base, (ulong)val, buf + 1, length - 1, need_zero);
-  buf--;
-
-  if (is_neg) {
-    *buf--= '-';
-  } else {
-    *buf--= '+';
-  }
-
-  return buf + 1;
-}
-
-uchar* get_nls_format(MYSQL *mysql, enum_field_types type)
-{
-  uchar *mysql_nls = NULL;
-
-  if (type == MYSQL_TYPE_DATETIME) {
-    mysql_nls = EXT_NLS_DATE_FORMAT(mysql);
-  } else if (type == MYSQL_TYPE_OB_TIMESTAMP_NANO || type == MYSQL_TYPE_OB_TIMESTAMP_WITH_LOCAL_TIME_ZONE) {
-    mysql_nls = EXT_NLS_TIMESTAMP_FORMAT(mysql);
-  } else if (type == MYSQL_TYPE_OB_TIMESTAMP_WITH_TIME_ZONE) {
-    mysql_nls = EXT_NLS_TIMESTAMP_TZ_FORMAT(mysql);
-  }
-
-  return mysql_nls;
-}
-
-
-//2019-01-01 12:12:12
-void oracle_date_to_ob_time(struct ObTime *ob_time, uchar *cp, ulong len)
-{
-  char *start = (char *)cp;
-  char *end = (char *)cp + len;
-  char *pos = NULL;
-
-  ob_time->time_zone_id_ = -1;
-
-  if (len > 0) {
-    pos = end;
-    ob_time->parts_[DT_YEAR] = strtol(start, &pos, 10);
-    if (*pos == '-' && end - pos > 1) {
-      start = pos + 1;
-      pos = end;
-      ob_time->parts_[DT_MON] = strtol(start, &pos, 10);
-      if (*pos == '-' && end - pos > 1) {
-        start = pos + 1;
-        pos = end;
-        ob_time->parts_[DT_MDAY] = strtol(start, &pos, 10);
-        if (*pos == ' ' && end - pos > 1) {
-          start = pos + 1;
-          pos = end;
-          ob_time->parts_[DT_HOUR] = strtol(start, &pos, 10);
-          if (*pos == ':' && end - pos > 1) {
-            start = pos + 1;
-            pos = end;
-            ob_time->parts_[DT_MIN] = strtol(start, &pos, 10);
-            if (*pos == ':' && end - pos > 1) {
-              int error;
-              start = pos + 1;
-              pos = end;
-              ob_time->parts_[DT_SEC] = strtoll10(start, &pos, &error);
-            }
-          }
-        }
-      }
-    }
-  }
-}
-
-void oracle_timestamp_to_ob_time(struct ObTime *ob_time, uchar *cp, enum_field_types type)
-{
-  uint century_offset = 0;
-  uint year_offset = 1;
-  uint mon_offset = 2;
-
-  uint nano_max_len = 9; //nano only need 9 digit, example: 000000001
-  uint nano_offset = 7;
-  uint nano_scale_offset = 11;
-
-  uint hour_offset = 12;
-  uint min_offset = 13;
-
-  uint tz_name_offset = 14;
-  uint tz_m = 0;
-  uint tz_n = 0;
-
-  int8_t sign = 1;
-  uint i = 0;
-
-  if (*(char*)(cp + century_offset) < 0 || *(char*)(cp + year_offset) < 0) {
-    sign = -1;
-  }
-  ob_time->parts_[DT_YEAR] = sign * (abs((*(char *)(cp + century_offset))) * 100 + abs(*(char *)(cp + year_offset)));
-
-  for (; i <= 5; i++) {
-    ob_time->parts_[DT_MON + i] = *(char *)(cp + mon_offset + i);
-  }
-
-  ob_time->parts_[DT_USEC] = uint4korr(cp + nano_offset);
-  ob_time->parts_[DT_DATE] = ob_time_to_date(ob_time);
-
-  //uint trans to string and fill zero, example: 000110000
-  ob_time->nano_scale_ = *(cp + nano_scale_offset);
-
-  //calculate space for nano, include zero before nano
-  if (ob_time->nano_scale_ > nano_max_len) {
-    ob_time->nano_scale_ = nano_max_len;
-  }
-
-  ob_time->time_zone_id_ = -1;
-  if (type == MYSQL_TYPE_OB_TIMESTAMP_WITH_TIME_ZONE) {
-    sign = 1;
-    if (*(char*)(cp + hour_offset) < 0 || *(char*)(cp + min_offset) < 0) {
-      sign = -1;
-    }
-    ob_time->parts_[DT_OFFSET_MIN] = sign * (abs((*(int8_t *)(cp + hour_offset))) * 60 + abs(*(int8_t *)(cp + min_offset)));
-
-    tz_m = *(cp + tz_name_offset);
-    tz_n = *(cp + tz_name_offset + 1 + tz_m);
-    if (tz_m > 0) {
-      ob_time->time_zone_id_ = 0;
-      memcpy(ob_time->tz_name_, cp + tz_name_offset + 1, tz_m);
-      if (tz_n > 0) {
-        memcpy(ob_time->tzd_abbr_, cp + tz_name_offset + 1 + tz_m + 1, tz_n);
-      }
-    }
-  }
-}
-
-ulong calculate_new_time_length_with_nls(MYSQL *mysql, uchar *cp, ulong len, enum_field_types type)
-{
-  struct ObTime ob_time;
-  uchar *mysql_nls = NULL;
-  int64_t length = 0;
-
-  memset(&ob_time, 0, sizeof(struct ObTime));
-  ob_time.mode_ |= DT_TYPE_ORACLE;
-
-  if (type == MYSQL_TYPE_OB_TIMESTAMP_NANO
-      || type == MYSQL_TYPE_OB_TIMESTAMP_WITH_LOCAL_TIME_ZONE
-      || type == MYSQL_TYPE_OB_TIMESTAMP_WITH_TIME_ZONE) {
-    oracle_timestamp_to_ob_time(&ob_time, cp, type);
-  } else {
-    oracle_date_to_ob_time(&ob_time, cp, len);
-  }
-
-  if (type == MYSQL_TYPE_DATETIME) {
-    mysql_nls = EXT_NLS_DATE_FORMAT(mysql);
-  } else if (type == MYSQL_TYPE_OB_TIMESTAMP_NANO || type == MYSQL_TYPE_OB_TIMESTAMP_WITH_LOCAL_TIME_ZONE) {
-    mysql_nls = EXT_NLS_TIMESTAMP_FORMAT(mysql);
-  } else if (type == MYSQL_TYPE_OB_TIMESTAMP_WITH_TIME_ZONE) {
-    mysql_nls = EXT_NLS_TIMESTAMP_TZ_FORMAT(mysql);
-  }
-
-  calculate_str_oracle_dfm_length(&ob_time, (char *)mysql_nls, strlen((char *)mysql_nls), ob_time.nano_scale_, &length);
-
-  return length;
-}
-
-//The search starts with a short gallop favoring small numbers,
-//after which it goes into a hand-woven binary search.
-inline uint fast_digits10(ulong v)
-{
-  static const ulong MAX_INTEGER[13] = {
-    0,
-    10,
-    100,
-    1000,
-    10000,
-    100000,
-    1000000,
-    10000000,
-    100000000,
-    1000000000,
-    10000000000,
-    100000000000,
-    1000000000000,
-  };
-  uint ret_int = 0;
-  if (v < MAX_INTEGER[1]) {
-    ret_int = 1;
-  } else if (v < MAX_INTEGER[2]) {
-    ret_int = 2;
-  } else if (v < MAX_INTEGER[3]) {
-    ret_int = 3;
-  } else if (v < MAX_INTEGER[12]) {
-    if (v < MAX_INTEGER[8]) {
-      if (v < MAX_INTEGER[6]) {
-        if (v < MAX_INTEGER[4]) {
-          ret_int = 4;
-        } else {
-          ret_int = 5 + (v >= MAX_INTEGER[5]);
-        }
-      } else {
-        ret_int = 7 + (v >= MAX_INTEGER[7]);
-      }
-    } else if (v < MAX_INTEGER[10]) {
-      ret_int = 9 + (v >= MAX_INTEGER[9]);
-    } else {
-      ret_int = 11 + (v >= MAX_INTEGER[11]);
-    }
-  } else {
-    ret_int = 12 + fast_digits10(v / MAX_INTEGER[12]);
-  }
-  return ret_int;
-}
-
-
-ulong calculate_interval_length(uchar *cp, enum_field_types type)
-{
-  ulong convert_len = 0;
-
-  const ulong MIN_YM_LEN = 7;
-  const ulong MIN_DS_LEN = 14;
-  const ulong MIN_YS_FORMAT_LEN = 6 - 2;//%c%0?d-%02d
-  const ulong MIN_DS_FORMAT_LEN_PART1 = 12 - 2;//%c%0?d %02d:%02d:%02d
-  const ulong MIN_DS_FORMAT_LEN_PART2 = 3 - 2;//.%0?d
-
-  if (type == MYSQL_TYPE_OB_INTERVAL_YM) {
-    const uint32 year_digit_cnt = fast_digits10(uint4korr(cp + 1));
-    const uint8_t year_scale = cp[6];
-    if (year_digit_cnt > year_scale) {
-      convert_len = MIN_YS_FORMAT_LEN + year_digit_cnt;
-    } else {
-      convert_len = MIN_YS_FORMAT_LEN + year_scale;
-    }
-    if (convert_len < MIN_YM_LEN) {
-      convert_len = MIN_YM_LEN;
-    }
-  } else {
-    const uint32 day_digit_cnt = fast_digits10(uint4korr(cp + 1));
-    const uint32 fs_digit_cnt = fast_digits10(uint4korr(cp + 8));
-    const uint8_t day_scale = cp[12];
-    const int8_t fs_scale = cp[13];
-    if (day_digit_cnt > (uint32)day_scale) {
-      convert_len = MIN_DS_FORMAT_LEN_PART1 + day_digit_cnt;
-    } else {
-      convert_len = MIN_DS_FORMAT_LEN_PART1 + day_scale;
-    }
-    if (fs_scale > 0) {
-      convert_len += MIN_DS_FORMAT_LEN_PART2;
-      if (fs_digit_cnt > (uint32)fs_scale) {
-        convert_len += fs_digit_cnt;
-      } else {
-        convert_len += fs_scale;
-      }
-    }
-    if (convert_len < MIN_DS_LEN) {
-      convert_len = MIN_DS_LEN;
-    }
-  }
-  return convert_len;
-}
-
-ulong rewrite_new_time_with_nls(MYSQL *mysql, uchar *cp, ulong len, char *to, int64_t buf_len, enum_field_types type)
-{
-  struct ObTime ob_time;
-  uchar *mysql_nls = NULL;
-  int64_t pos = 0;
-
-  memset(&ob_time, 0, sizeof(struct ObTime));
-  ob_time.mode_ |= DT_TYPE_ORACLE;
-
-  if (type == MYSQL_TYPE_OB_TIMESTAMP_NANO
-      || type == MYSQL_TYPE_OB_TIMESTAMP_WITH_LOCAL_TIME_ZONE
-      || type == MYSQL_TYPE_OB_TIMESTAMP_WITH_TIME_ZONE) {
-    oracle_timestamp_to_ob_time(&ob_time, cp, type);
-  } else {
-    oracle_date_to_ob_time(&ob_time, cp, len);
-  }
-
-  if (type == MYSQL_TYPE_DATETIME) {
-    mysql_nls = EXT_NLS_DATE_FORMAT(mysql);
-  } else if (type == MYSQL_TYPE_OB_TIMESTAMP_NANO || type == MYSQL_TYPE_OB_TIMESTAMP_WITH_LOCAL_TIME_ZONE) {
-    mysql_nls = EXT_NLS_TIMESTAMP_FORMAT(mysql);
-  } else if (type == MYSQL_TYPE_OB_TIMESTAMP_WITH_TIME_ZONE) {
-    mysql_nls = EXT_NLS_TIMESTAMP_TZ_FORMAT(mysql);
-  }
-
-  ob_time_to_str_oracle_dfm(&ob_time, (char *)mysql_nls, strlen((char *)mysql_nls), ob_time.nano_scale_, to, buf_len, &pos);
-
-  return pos;
-}
-static const char separator[]= "-- ::.";
-
-ulong rewrite_new_time(uchar *cp, char *to, enum_field_types type)
-{
-  ulong convert_len = 20; //2012-12-02 12:34:56.
-
-  char nano_buffer[10] = "\0";
-  uint nano_max_len = 9; //nano only need 9 digit, example: 000000001
-  uint nano_offset = 7;
-  uint nano_scale;
-  uint nano_scale_offset = 11;
-
-  uint tz_name_offset = 14;
-  uint tz_m = 0;
-  uint tz_n = 0;
-
-  uint hour_offset = 12;
-  uint min_offset = 13;
-
-  uint i;
-
-  //rewrite the fix data, example: 2012-12-02 12:34:56.
-  my_safe_ultoa(10, *cp, to, 2, TRUE);
-  to += 2;
-
-  for (i = 0; i <= 5; i++) {
-    my_safe_ultoa(10, *(cp + 1 + i), to, 2, TRUE);
-    to += 2;
-    memcpy(to++, separator + i, 1);
-  }
-
-  //rewrite nano
-  nano_scale = *(cp + nano_scale_offset);
-  if (0 != nano_scale) {
-    if (nano_scale > nano_max_len) {
-      nano_scale = nano_max_len;
-    }
-
-    my_safe_ultoa(10, uint4korr(cp + nano_offset), nano_buffer, nano_max_len, TRUE);
-    memcpy(to, nano_buffer, nano_scale);
-    convert_len += nano_scale;
-    to += nano_scale;
-  }
-
-  if (type == MYSQL_TYPE_OB_TIMESTAMP_WITH_TIME_ZONE) {
-    memcpy(to++, " ", 1);
-    convert_len += 1;
-
-    tz_m = *(cp + tz_name_offset);
-    tz_n = *(cp + tz_name_offset + 1 + tz_m);
-    if (tz_m > 0) {
-      memcpy(to, cp + tz_name_offset + 1, tz_m);
-      convert_len += tz_m;
-      to += tz_m;
-      if (tz_n > 0) {
-        memcpy(to++, " ", 1);
-        convert_len += 1;
-
-        memcpy(to, cp + tz_name_offset + 1 + tz_m + 1, tz_n);
-        convert_len += tz_n;
-        to += tz_n;
-      }
-    } else {
-      // +/-08:00
-      if (*(char*)(cp + hour_offset) < 0 || *(char*)(cp + min_offset) < 0) {
-        memcpy(to++, "-", 1);
-      } else {
-        memcpy(to++, "+", 1);
-      }
-      convert_len += 1;
-
-      my_safe_ultoa(10, abs(*(char*)(cp + hour_offset)), to, 2, TRUE);
-      convert_len += 2;
-      to += 2;
-
-      memcpy(to++, ":", 1);
-      convert_len += 1;
-
-      my_safe_ultoa(10, abs(*(char*)(cp + min_offset)), to, 2, TRUE);
-      convert_len += 2;
-      to += 2;
-    }
-  }
-
-  return convert_len;
-}
-
-
-int rewrite_interval(uchar *cp, char *to, const uint to_size, ulong *convert_len, enum_field_types type)
-{
-  int wlen = 0;
-  *convert_len = 0;
-
-  if (type == MYSQL_TYPE_OB_INTERVAL_YM) {
-    char format_str[] = "%02u";
-    const int scale_idx = 2;
-
-    to[0] = (cp[0] > 0 ? '-' : '+');
-    *convert_len = 1;
-
-    format_str[scale_idx] = (char)('0' + cp[6]);
-    wlen = snprintf(to + *convert_len, to_size, format_str,
-                    uint4korr(cp + 1));
-    if (wlen <= 0) {
-      return 0;
-    } else {
-      (*convert_len) += wlen;
-      to[*convert_len] = '-';
-      my_safe_ultoa(10, cp[5], to + *convert_len + 1, 2, TRUE);
-      (*convert_len) += 3;
-    }
-  } else {
-    char format_str_part1[] = "%02u";
-    const int day_scale_idx = 2;
-    int8 fs_scale = 0;
-
-    to[0] = (cp[0] > 0 ? '-' : '+');
-    *convert_len = 1;
-
-    format_str_part1[day_scale_idx] = (char)('0' + cp[12]);
-    wlen = snprintf(to + *convert_len, to_size, format_str_part1,
-                       uint4korr(cp + 1));
-    if (wlen <= 0) {
-      return 0;
-    } else {
-      (*convert_len) += wlen;
-      to[*convert_len] = ' ';
-      my_safe_ultoa(10, cp[5], to + *convert_len + 1, 2, TRUE);
-      to[*convert_len + 3] = ':';
-      my_safe_ultoa(10, cp[6], to + *convert_len + 4, 2, TRUE);
-      to[*convert_len + 6] = ':';
-      my_safe_ultoa(10, cp[7], to + *convert_len + 7, 2, TRUE);
-      (*convert_len) += 9;
-    }
-
-    fs_scale = cp[13];
-    if (fs_scale > 0) {
-      char nano_buffer[10] = {0};
-      const int8 nano_max_len = 9; //nano only need 9 digit, example: 000000001
-
-      to[*convert_len] = '.';
-      (*convert_len) += 1;
-
-      if (fs_scale > nano_max_len) {
-        fs_scale = nano_max_len;
-      }
-
-      my_safe_ultoa(10, uint4korr(cp + 8), nano_buffer, nano_max_len, TRUE);
-      memcpy(to + *convert_len, nano_buffer, fs_scale);
-      (*convert_len) += fs_scale;
-    }
-  }
-  return 1;
-}
 /* Read all rows (fields or data) from server */
 
 MYSQL_DATA *mthd_my_read_rows(MYSQL *mysql,MYSQL_FIELD *mysql_fields,
@@ -1474,8 +948,6 @@ MYSQL_DATA *mthd_my_read_rows(MYSQL *mysql,MYSQL_FIELD *mysql_fields,
   MYSQL_DATA *result;
   MYSQL_ROWS **prev_ptr,*cur;
   NET *net = &mysql->net;
-
-  ulong convert_len;
 
   if ((pkt_len= ma_net_safe_read(mysql)) == packet_error)
     return(0);
@@ -1492,35 +964,6 @@ MYSQL_DATA *mthd_my_read_rows(MYSQL *mysql,MYSQL_FIELD *mysql_fields,
 
   while (*(cp=net->read_pos) != 254 || pkt_len >= 8)
   {
-    if (mysql_fields) {
-      for (field=0 ; field < fields ; field++) {
-        if ((len=(ulong) net_field_length(&cp)) == NULL_LENGTH) {
-          continue;
-        }
-
-        //calculate the space for new type
-        if (mysql->oracle_mode
-            && (mysql_fields[field].type == MYSQL_TYPE_DATETIME
-                || mysql_fields[field].type == MYSQL_TYPE_OB_TIMESTAMP_NANO
-                || mysql_fields[field].type == MYSQL_TYPE_OB_TIMESTAMP_WITH_LOCAL_TIME_ZONE
-                || mysql_fields[field].type == MYSQL_TYPE_OB_TIMESTAMP_WITH_TIME_ZONE)) {
-          convert_len = calculate_new_time_length_with_nls(mysql, cp, len, mysql_fields[field].type);
-          //already include '/0' in the end
-          pkt_len = pkt_len - len + convert_len;
-        } else if (mysql_fields[field].type == MYSQL_TYPE_OB_RAW) {
-          convert_len = len * 2;
-          //already include '/0' in the end
-          pkt_len = pkt_len - len + convert_len;
-        } else if (mysql_fields[field].type == MYSQL_TYPE_OB_INTERVAL_YM
-                   || mysql_fields[field].type == MYSQL_TYPE_OB_INTERVAL_DS) {
-          convert_len = calculate_interval_length(cp, mysql_fields[field].type);
-          //already include '/0' in the end
-          pkt_len = pkt_len - len + convert_len;
-        }
-        cp+=len;
-      }
-    }
-    cp = net->read_pos;
     result->rows++;
     if (!(cur= (MYSQL_ROWS*) ma_alloc_root(&result->alloc,
 					    sizeof(MYSQL_ROWS))) ||
@@ -1544,66 +987,21 @@ MYSQL_DATA *mthd_my_read_rows(MYSQL *mysql,MYSQL_FIELD *mysql_fields,
       }
       else
       {
-        int is_done = 0;
-
         cur->data[field] = to;
-        if ((len > (ulong)(end_to - to) || to > end_to)
-            && !(mysql->oracle_mode
-                && (mysql_fields[field].type == MYSQL_TYPE_DATETIME
-                    || mysql_fields[field].type == MYSQL_TYPE_OB_TIMESTAMP_NANO
-                    || mysql_fields[field].type == MYSQL_TYPE_OB_TIMESTAMP_WITH_LOCAL_TIME_ZONE
-                    || mysql_fields[field].type == MYSQL_TYPE_OB_TIMESTAMP_WITH_TIME_ZONE)))
+        if (len > (ulong)(end_to - to) || to > end_to)
         {
           free_rows(result);
           SET_CLIENT_ERROR(mysql, CR_UNKNOWN_ERROR, SQLSTATE_UNKNOWN, 0);
           return(0);
         }
-        if (mysql_fields) {
-          if (mysql->oracle_mode
-              && (mysql_fields[field].type == MYSQL_TYPE_DATETIME
-                  || mysql_fields[field].type == MYSQL_TYPE_OB_TIMESTAMP_NANO
-                  || mysql_fields[field].type == MYSQL_TYPE_OB_TIMESTAMP_WITH_LOCAL_TIME_ZONE
-                  || mysql_fields[field].type == MYSQL_TYPE_OB_TIMESTAMP_WITH_TIME_ZONE)) {
-            convert_len = rewrite_new_time_with_nls(mysql, cp, len, to, end_to - to + 1, mysql_fields[field].type);
-            to[convert_len]=0;
-            to+=convert_len+1;
-            cp+=len;
-            len = convert_len;
-            is_done = 1;
-          } else if (mysql_fields[field].type == MYSQL_TYPE_OB_RAW) {
-            uchar *end = cp + len;
-            for(; cp < end; cp++, to+=2) {
-              sprintf(to, "%02X", *((uchar*)cp));
-            }
-
-            (*to++)=0;
-            len *= 2;
-            is_done = 1;
-          } else if (mysql_fields[field].type == MYSQL_TYPE_OB_INTERVAL_YM
-                     || mysql_fields[field].type == MYSQL_TYPE_OB_INTERVAL_DS) {
-            if (!rewrite_interval(cp, to, (uint)(end_to - to), &convert_len, mysql_fields[field].type)) {
-              free_rows(result);
-              return (0);
-            }
-            to[convert_len]=0;
-            to+=convert_len+1;
-            cp+=len;
-            len = convert_len;
-            is_done = 1;
-          }
-        }
-        if (!is_done) {
-          memcpy(to,(char*) cp,len); to[len]=0;
-          to+=len+1;
-          cp+=len;
-          is_done = 1;
-        }
-       
+        memcpy(to,(char*) cp,len); to[len]=0;
+        to+=len+1;
+        cp+=len;
         if (mysql_fields)
         {
           if (mysql_fields[field].max_length < len)
             mysql_fields[field].max_length=len;
-        }
+         }
       }
     }
     cur->data[field]=to;			/* End of last field */
@@ -1702,13 +1100,6 @@ mysql_init(MYSQL *mysql)
     mysql->net.pvio= 0;
     mysql->free_me= 0;
     mysql->net.extension= 0;
-  }
-
-   /* Initialize extensions. */
-  if (!(mysql->ob_extension= mysql_extension_init(mysql)))
-  {
-    SET_CLIENT_ERROR(mysql, CR_OUT_OF_MEMORY, SQLSTATE_UNKNOWN, 0);
-    return 0;
   }
 
   if (!(mysql->net.extension= (struct st_mariadb_net_extension *)
@@ -1936,47 +1327,6 @@ mysql_real_connect(MYSQL *mysql, const char *host, const char *user,
     return my;
   }
 #endif
-}
-
-static unsigned long mysql_get_version_tool(const char* version_str)
-{
-  unsigned long major= 0, minor= 0, version= 0;
-
-  if (version_str)
-  {
-    char *pos= version_str, *end_pos;
-    major=   strtoul(pos, &end_pos, 10);  pos=end_pos+1;
-    minor=   strtoul(pos, &end_pos, 10);  pos=end_pos+1;
-    version= strtoul(pos, &end_pos, 10);
-  }
-  else
-  {
-    // set_mysql_error(mysql, CR_COMMANDS_OUT_OF_SYNC, unknown_sqlstate);
-  }
-  return major*10000 + minor*100 + version;
-}
-static void get_ob_server_version(MYSQL *con)
-{
-  /* Only one thread calls this, so no synchronization is needed */
-  MYSQL_RES *result;
-
-  /* "limit 1" is protection against SQL_SELECT_LIMIT=0 */
-  char const *sql = con->oracle_mode ? "select @@version_comment, @@version from dual where rownum <= 1" : "select @@version_comment, @@version limit 1";
-  if (!mysql_query(con, sql) &&
-      (result = mysql_use_result(con)))
-  {
-    MYSQL_ROW cur = mysql_fetch_row(result);
-    if (cur && cur[0] && cur[1])
-    {
-      // only get ob server version
-      if (strlen(cur[0]) > 9 && strncasecmp(cur[0], "OceanBase", 9) == 0)
-      {
-        con->ob_server_version = mysql_get_version_tool(cur[1]);
-      }
-    }
-    mysql_free_result(result);
-  }
-  return;
 }
 
 MYSQL *mthd_my_real_connect(MYSQL *mysql, const char *host, const char *user,
@@ -2316,8 +1666,7 @@ MYSQL *mthd_my_real_connect(MYSQL *mysql, const char *host, const char *user,
       goto error;
     }
   }
-  get_ob_server_version(mysql);
-  determine_use_prepare_execute(mysql);
+
   if (mysql->options.init_command)
   {
     char **begin= (char **)mysql->options.init_command->buffer;
@@ -2801,8 +2150,6 @@ int ma_read_ok_packet(MYSQL *mysql, uchar *pos, ulong length)
 {
   uchar *end= mysql->net.read_pos+length;
   size_t item_len;
-  enum enum_nls_time_type nls_time_type;
-  uchar *mysql_nls = NULL;
   mysql->affected_rows= net_field_length_ll(&pos);
   mysql->insert_id=	  net_field_length_ll(&pos);
   mysql->server_status=uint2korr(pos);
@@ -2898,15 +2245,6 @@ int ma_read_ok_packet(MYSQL *mysql, uchar *pos, ulong length)
                 /* make sure that we update charset in case it has changed */
                 if (!strncmp(str->str, "character_set_client", str->length))
                   set_charset= 1;
-                if (!strncmp(str->str, "nls_date_format", str->length)) {
-                  nls_time_type = NLS_DATE_FORMAT;
-                } else if(!strncmp(str->str, "nls_timestamp_format", str->length)) {
-                  nls_time_type = NLS_TIMESTAMP_FORMAT;
-                } else if (!strncmp(str->str, "nls_timestamp_tz_format", str->length)) {
-                  nls_time_type = NLS_TIMESTAMP_TZ_FORMAT;
-                } else {
-                  nls_time_type = NLS_TIME_MAX;
-                }
                 plen= net_field_length(&pos);
                 if (pos + plen > end)
                   goto corrupted;
@@ -2931,17 +2269,6 @@ int ma_read_ok_packet(MYSQL *mysql, uchar *pos, ulong length)
                   cs_name[str->length]= 0;
                   if ((cs_info = mysql_find_charset_name(cs_name)))
                     mysql->charset= cs_info;
-                }
-                if (nls_time_type >= NLS_DATE_FORMAT && nls_time_type < NLS_TIME_MAX) {
-                  if (nls_time_type == NLS_DATE_FORMAT) {
-                    mysql_nls = EXT_NLS_DATE_FORMAT(mysql);
-                  } else if (nls_time_type == NLS_TIMESTAMP_FORMAT) {
-                    mysql_nls = EXT_NLS_TIMESTAMP_FORMAT(mysql);
-                  } else if (nls_time_type == NLS_TIMESTAMP_TZ_FORMAT) {
-                    mysql_nls = EXT_NLS_TIMESTAMP_TZ_FORMAT(mysql);
-                  }
-                  memcpy(mysql_nls, str->str, str->length);
-                  mysql_nls[str->length] = '\0';
                 }
               }
               break;
@@ -4210,11 +3537,6 @@ MYSQL_FIELD * STDCALL mysql_fetch_fields(MYSQL_RES *res)
   return (res)->fields;
 }
 
-MYSQL_FIELD * STDCALL mysql_fetch_params(MYSQL_RES *res)
-{
-  return (res)->param_fields;
-}
-
 MYSQL_ROWS * STDCALL mysql_row_tell(MYSQL_RES *res)
 {
   return res->data_cursor;
@@ -4569,7 +3891,7 @@ mysql_get_server_name(MYSQL *mysql)
   if (mysql->options.extension &&
       mysql->options.extension->db_driver != NULL)
     return mysql->options.extension->db_driver->name;
-  return mariadb_connection(mysql) ? "MariaDB" : "Oceanbase";
+  return mariadb_connection(mysql) ? "MariaDB" : "MySQL";
 }
 
 static my_socket mariadb_get_socket(MYSQL *mysql)
