@@ -74,6 +74,7 @@
 #endif
 #include <mysql/client_plugin.h>
 #ifdef _WIN32
+#include <ws2tcpip.h>
 #include "shlwapi.h"
 #define strncasecmp _strnicmp
 #endif
@@ -152,6 +153,36 @@ static int cli_report_progress(MYSQL *mysql, uchar *packet, uint length);
 
 extern int mysql_client_plugin_init();
 extern void mysql_client_plugin_deinit();
+
+static my_bool
+ma_set_connect_attrs_extend(MYSQL *mysql);
+
+my_bool get_local_ip_port(my_socket fd, char *ip, int iplen, int *port)
+{
+  struct sockaddr local_addr;
+  socklen_t len = sizeof(struct sockaddr);
+  if (getsockname(fd, &local_addr, &len) == 0) {
+    struct sockaddr_in *sin = (struct sockaddr_in *)(&local_addr);
+    void *tmp = &(sin->sin_addr);
+    //just IPV4
+#if defined(_WIN32) /* _WIN32 */
+    char *ip_str = inet_ntoa(sin->sin_addr); 
+    if (NULL != ip_str) }
+      memcpy(ip, ip_str, strlen(ip_str));
+    } else {
+      return FALSE;
+    }
+#else
+    if (inet_ntop(AF_INET, tmp, ip, iplen) == NULL){
+      return FALSE;
+    }
+#endif /* defined(_WIN32) */
+    *port = ntohs(sin->sin_port);
+    return TRUE;
+  } else {
+    return FALSE;
+  }
+}
 
 /* net_get_error */
 void net_get_error(char *buf, size_t buf_len,
@@ -1171,6 +1202,9 @@ char *ma_send_connect_attr(MYSQL *mysql, unsigned char *buffer)
 {
   if (mysql->server_capabilities & CLIENT_CONNECT_ATTRS)
   {
+    /* Init Client IP and port before send */
+    ma_set_connect_attrs_extend(mysql);
+
     buffer= (unsigned char *)mysql_net_store_length((unsigned char *)buffer, (mysql->options.extension) ?
                              mysql->options.extension->connect_attrs_len : 0);
     if (mysql->options.extension &&
@@ -1195,6 +1229,30 @@ char *ma_send_connect_attr(MYSQL *mysql, unsigned char *buffer)
     }
   }
   return (char *)buffer;
+}
+
+/** Set some default attributes in extend, it will be called when 
+ *  the connection has been built */
+static my_bool
+ma_set_connect_attrs_extend(MYSQL *mysql)
+{
+  char ip_buffer[100] = {0};
+  char port_buffer[10] = {0};
+  int port = 0;
+  int rc= 0;
+
+  rc= mysql_options(mysql, MYSQL_OPT_CONNECT_ATTR_DELETE, "__client_ip") +
+      mysql_options(mysql, MYSQL_OPT_CONNECT_ATTR_DELETE, "__client_port");
+
+  if (NULL != mysql && get_local_ip_port(mysql->net.fd, ip_buffer, 100, &port)) {
+    snprintf(port_buffer, 10, "%d", port);
+  } else {
+    snprintf(ip_buffer, 100, "%s", "invalid");
+    snprintf(port_buffer, 10, "%s", "invalid");
+  }
+  rc+= mysql_optionsv(mysql, MYSQL_OPT_CONNECT_ATTR_ADD, "__client_ip", ip_buffer);
+  rc+= mysql_optionsv(mysql, MYSQL_OPT_CONNECT_ATTR_ADD, "__client_port", port_buffer);
+  return(test(rc>0));
 }
 
 /** set some default attributes */
