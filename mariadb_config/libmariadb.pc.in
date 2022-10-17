@@ -10,11 +10,11 @@ prefix=@CMAKE_INSTALL_PREFIX@
 includedir=${prefix}/@INSTALL_INCLUDEDIR@/@SUFFIX_INSTALL_DIR@
 libdir=${prefix}/@INSTALL_LIBDIR@/@SUFFIX_INSTALL_DIR@
 
-Name: libmariadb
+Name: libobclnt
 Version: @CPACK_PACKAGE_VERSION@
 Description: MariaDB Connector/C dynamic library
 Cflags: -I${includedir}
-Libs: -L${libdir} -lmariadb
+Libs: -L${libdir} -lobclnt
 Libs.private: @extra_dynamic_LDFLAGS@
 
 

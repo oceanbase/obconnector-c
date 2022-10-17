@@ -37,11 +37,11 @@ do
 done
 mkdir -p $RPM_BUILD_ROOT%{prefix}
 mv $RPM_BUILD_ROOT%{file_dir}/* $RPM_BUILD_ROOT%{prefix}
-mv $RPM_BUILD_ROOT%{prefix}/include/mariadb $RPM_BUILD_ROOT%{prefix}/include/mariadb_bak
-mv $RPM_BUILD_ROOT%{prefix}/include/mariadb_bak/* $RPM_BUILD_ROOT%{prefix}/include/
-rm -rf $RPM_BUILD_ROOT%{prefix}/include/mariadb_bak
-mv $RPM_BUILD_ROOT%{prefix}/lib/mariadb/* $RPM_BUILD_ROOT%{prefix}/lib/
-rm -rf $RPM_BUILD_ROOT%{prefix}/lib/mariadb
+#mv $RPM_BUILD_ROOT%{prefix}/include/mariadb $RPM_BUILD_ROOT%{prefix}/include/mariadb_bak
+#mv $RPM_BUILD_ROOT%{prefix}/include/mariadb_bak/* $RPM_BUILD_ROOT%{prefix}/include/
+#rm -rf $RPM_BUILD_ROOT%{prefix}/include/mariadb_bak
+#mv $RPM_BUILD_ROOT%{prefix}/lib/mariadb/* $RPM_BUILD_ROOT%{prefix}/lib/
+#rm -rf $RPM_BUILD_ROOT%{prefix}/lib/mariadb
 
 %clean
 rm -rf $RPM_BUILD_ROOT

@@ -1,0 +1,113 @@
+##########################################################
+#            OBFlow Secret Scan Ignore List              #
+##########################################################
+# Above the segmentation lines there are suspected privacy information #
+# Please use the file name as the first line and the igored information #
+# should be started with tab. #
+# Under the segmentation lines there are the folders which you need to ignore #
+##########################################################
+**
+  http://www.gnu.org/licenses/
+  http://www.gnu.org/licenses
+  http://license.coscl.org.cn/MulanPubL-2.0
+  https://open.oceanbase.com/
+  https://open.oceanbase.com
+  https://github.com/oceanbase/oceanbase
+  https://github.com/oceanbase/oceanbase/issues
+  http://www.mysql.com/downloads
+  http://dev.mysql.com/doc/refman/5.7/en/source-installation.html
+  http://dev.mysql.com/doc/refman/5.7/en/
+  http://www.gnu.org/licenses/
+  http://oceanbase.com/
+  https://gw.alipayobjects.com/zos/bmw-prod/d6c1a0b7-c714-4429-8a33-2b394a5c1bf1.svg
+  https://www.oceanbase.com/)
+  https://www.oceanbase.com/docs)
+  http://tools.ietf.org/html/rfc1950
+  http://zlib.net/
+  http://zlib.net/zlib_faq.html
+  http://marknelson.us/1997/01/01/zlib-engine/
+  http://java.sun.com/developer/technicalArticles/Programming/compression/
+  http://search.cpan.org/~pmqs/IO-Compress-Zlib/
+  http://docs.python.org/library/zlib.html
+  http://wiki.tcl.tk/4610
+  http://palmzlib.sourceforge.net/
+  http://tools.ietf.org/html/...
+  http://treebuild.metux.de/)
+  http://www.zlib.org/advisory-2002-03-11.txt
+  http://www.muppetlabs.com/~breadbox/software/assembly.html
+  http://www.winimage.com/zLibDll/unzip.html
+  http://marknelson.us/1997/01/01/zlib-engine/
+  http://zlib.net/zlib_how.html
+  http://www.pdflib.com/
+  http://sourceforge.net/projects/acroformtool/
+  http://www.sunfreeware.com
+  http://www.gzip.org/#faq11
+  http://www.ijs.si/software/snprintf/
+  http://www.gnupg.org/
+  http://www.info-zip.org/
+  http://tools.ietf.org/html/rfc1951
+  http://mariadb.mirrors.ovh.net/MariaDB/mariadb-%DB%/winx64-packages/mariadb-%DB%-winx64.msi
+  http://timestamp.verisign.com/scripts/timstamp.dll)
+  http://tools.ietf.org/html/rfc1950
+  http://msdn2.microsoft.com/en-us/library/ms776446.aspx
+  http://www.faqs.org/rfcs/rfc2781.html
+  http://forums.belution.com/ja/vc/000/234/78s.shtml
+  http://nienie.com/~masapico/api_ImageDirectoryEntryToData.html
+  http://msdn.microsoft.com/en-us/library/windows/desktop/ms738586(v=vs.85).aspx
+  https://mariadb.com/kb/en/library/eof_packet/
+  https://mariadb.com/kb/en/library/2-binlog-event-header/
+  http://www.php.net
+  http://www.php.net/software
+  http://www.netlib.org/fp/dtoa.c
+  http://www.php.net/license/3_01.txt
+  https://mariadb.com/kb/en/mariadb/configuring-mariadb-with-mycnf/
+  https://dev.mysql.com/doc/refman/8.0/en/datetime.html
+  https://jira.mariadb.org
+  http://schemas.microsoft.com/wix/2006/wi
+  https://facebook.github.io/watchman/)
+  http://www.freedesktop.org/wiki/Software/pkg-config/)
+  http://schemas.microsoft.com/office/word/2003/wordml
+  http://www.php.net/software/
+  jloup@gzip.org
+  zlib@gzip.org
+  info@winimage.com
+  markn@ieee.org
+  pmqs@cpan.org
+  amk@amk.ca
+  madler@alumni.caltech.edu
+  rbrown64@csc.com.au
+  kevin@rodin.wustl.edu
+  Tyge.Lovset@cmr.no
+  paag@tid.es
+  c_rios@sonda.cl
+  michael.bell@web.de
+  toscano.pino@tiscali.it
+  malbrech@eso.org
+  vince@kyllikki.org
+  georg@mariadb.com
+  martinsc@uol.com.br
+  sinisa@coresinc.com
+  license@php.net
+  georg@mysql.com
+  andrey@mysql.com
+  uwendel@mysql.com
+  kpv@research.att.com
+  gsf@research.att.com
+  chongo@toad.com
+  andrey@php.net
+  someUser
+**/*.c
+  http://www.gnu.org/licenses/
+  http://www.gnu.org/licenses
+  http://www.php.net
+  http://www.php.net/software
+--------------------------------------------------------
+# Should use GLOB wildcard to config and analysis the ignored folder
+# The root patch shold start with '/'
+/BUILD/**
+/.secignore
+--------------------------------------------------------
+# Config the ignored fold to escape the Chinese scan by GLOB wildcard
+**/*.md
+/tools/**
+/test/test.conf

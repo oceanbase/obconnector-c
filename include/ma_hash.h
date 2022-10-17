@@ -1,7 +1,7 @@
 /************************************************************************************
     Copyright (C) 2000, 2012 MySQL AB & MySQL Finland AB & TCX DataKonsult AB,
                  Monty Program AB
-   
+   Copyright (c) 2021 OceanBase.
    This library is free software; you can redistribute it and/or
    modify it under the terms of the GNU Library General Public
    License as published by the Free Software Foundation; either
@@ -26,19 +26,20 @@
 #ifdef	__cplusplus
 extern "C" {
 #endif
-
+#include "ma_global.h"
+#include "ma_sys.h"
 typedef uchar *(*hash_get_key)(const uchar *,uint*,my_bool);
 typedef void (*hash_free_key)(void *);
 
   /* flags for hash_init */
 #define HASH_CASE_INSENSITIVE	1
 
-typedef struct st_hash_info {
+typedef struct ob_st_hash_info {
   uint next;					/* index to next key */
   uchar *data;					/* data for current entry */
-} HASH_LINK;
+} OB_HASH_LINK;
 
-typedef struct st_hash {
+struct ob_st_hash {
   uint key_offset,key_length;		/* Length of key if const length */
   uint records,blength,current_record;
   uint flags;
@@ -46,20 +47,23 @@ typedef struct st_hash {
   hash_get_key get_key;
   void (*free)(void *);
   uint (*calc_hashnr)(const uchar *key,uint length);
-} HASH;
-
+} ;
+#ifndef TYPE_DEFINE_OB_HASH
+#define TYPE_DEFINE_OB_HASH
+typedef struct ob_st_hash OB_HASH;
+#endif
 #define hash_init(A,B,C,D,E,F,G) _hash_init(A,B,C,D,E,F,G CALLER_INFO)
-my_bool _hash_init(HASH *hash,uint default_array_elements, uint key_offset,
+my_bool _hash_init(OB_HASH *hash,uint default_array_elements, uint key_offset,
 		  uint key_length, hash_get_key get_key,
-		  void (*free_element)(void*), uint flags CALLER_INFO_PROTO);
-void hash_free(HASH *tree);
-uchar *hash_element(HASH *hash,uint idx);
-void * hash_search(HASH *info,const uchar *key,uint length);
-void * hash_next(HASH *info,const uchar *key,uint length);
-my_bool hash_insert(HASH *info,const uchar *data);
-my_bool hash_delete(HASH *hash,uchar *record);
-my_bool hash_update(HASH *hash,uchar *record,uchar *old_key,uint old_key_length);
-my_bool hash_check(HASH *hash);			/* Only in debug library */
+		  void (*free_element)(void*), uint flags);
+void hash_free(OB_HASH *tree);
+uchar *hash_element(OB_HASH *hash,uint idx);
+void * hash_search(OB_HASH *info,const uchar *key,uint length);
+void * hash_next(OB_HASH *info,const uchar *key,uint length);
+my_bool hash_insert(OB_HASH *info,const uchar *data);
+my_bool hash_delete(OB_HASH *hash,uchar *record);
+my_bool hash_update(OB_HASH *hash,uchar *record,uchar *old_key,uint old_key_length);
+my_bool hash_check(OB_HASH *hash);			/* Only in debug library */
 
 #define hash_clear(H) memset((char*) (H), 0,sizeof(*(H)))
 #define hash_inited(H) ((H)->array.buffer != 0)

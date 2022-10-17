@@ -1,5 +1,5 @@
 /************************************************************************
-  
+   Copyright (c) 2021 OceanBase.
    This library is free software; you can redistribute it and/or
    modify it under the terms of the GNU Library General Public
    License as published by the Free Software Foundation; either
@@ -21,6 +21,11 @@
 
 *************************************************************************/
 #include <stdint.h>
+
+#ifdef _WIN32
+typedef unsigned int uint;
+typedef unsigned long	ulong;
+#endif
 
 #define MYSQL_NO_DATA 100
 #define MYSQL_DATA_TRUNCATED 101
@@ -55,7 +60,6 @@ do { \
 #define MYSQL_PS_SKIP_RESULT_STR    -2
 #define STMT_ID_LENGTH 4
 
-
 typedef struct st_mysql_stmt MYSQL_STMT;
 
 typedef MYSQL_RES* (*mysql_stmt_use_or_store_func)(MYSQL_STMT *);
@@ -65,6 +69,7 @@ enum enum_stmt_attr_type
   STMT_ATTR_UPDATE_MAX_LENGTH,
   STMT_ATTR_CURSOR_TYPE,
   STMT_ATTR_PREFETCH_ROWS,
+  STMT_ATTR_ARRAY_BIND,
 
   /* MariaDB only */
   STMT_ATTR_PREBIND_PARAMS=200,
@@ -84,6 +89,9 @@ enum enum_cursor_type
   CURSOR_TYPE_SCROLLABLE= 4
 };
 
+#define CURSOR_TYPE_ARRAY_BIND 8
+#define CURSOR_TYPE_SAVE_EXCEPTION 16
+
 enum enum_indicator_type
 {
   STMT_INDICATOR_NTS=-1,
@@ -92,6 +100,12 @@ enum enum_indicator_type
   STMT_INDICATOR_DEFAULT=2,
   STMT_INDICATOR_IGNORE=3,
   STMT_INDICATOR_IGNORE_ROW=4
+};
+
+enum enum_prepare_execute_request_ext_flag
+{
+  STMT_PRE_EXE_EFLAG_DEFAULT=0,
+  STMT_PRE_EXE_EFLAG_NEED_ARRAYBIND_RES= 2  //need resultset for arraybinding for all types(dml/pl etc.)
 };
 
 /*
@@ -137,8 +151,14 @@ typedef struct st_mysql_bind
   my_bool        error_value;      /* used if error is 0 */
   my_bool        is_unsigned;      /* set if integer type is unsigned */
   my_bool        long_data_used;   /* If used with mysql_send_long_data */
+  my_bool	       piece_data_used;	 /* If used with mysql_send_piece_data */
   my_bool        is_null_value;    /* Used if is_null is 0 */
+  my_bool        is_handle_returning_into; /* is handling the result of returning into*/
+  my_bool        no_need_to_parser_result;   /* skip to parse the column for this result */
+  unsigned long  last_offset;
   void           *extension;
+  MYSQL          *mysql;
+  MA_MEM_ROOT    bind_alloc; /* use for complex type */
 } MYSQL_BIND;
 
 //add for oboracle complex type
@@ -172,6 +192,14 @@ typedef struct st_mysql_complex_bind_object
 {
   COMPLEX_OBJECT_HEADER;
 } MYSQL_COMPLEX_BIND_OBJECT;
+
+// add for support send pl array maxrarr_len
+typedef struct st_mysql_complex_bind_plarray
+{
+  COMPLEX_OBJECT_HEADER;
+  unsigned long maxrarr_len;
+  enum enum_field_types elem_type;
+} MYSQL_COMPLEX_BIND_PLARRAY;
 
 typedef struct st_mysql_complex_bind_object MYSQL_COMPLEX_BIND_ARRAY;
 //end add for oboracle complex type
@@ -269,6 +297,7 @@ struct st_mysql_stmt
   unsigned char            send_types_to_server;
   MYSQL_BIND               *params;
   MYSQL_BIND               *bind;
+  MYSQL_FIELD              *param_fields;        /* result set metadata */
   MYSQL_DATA               result;  /* we don't use mysqlnd's result set logic */
   MYSQL_ROWS               *result_cursor;
   my_bool                  bind_result_done;
@@ -297,7 +326,131 @@ struct st_mysql_stmt
   void *user_data;
   ps_result_callback result_callback;
   ps_param_callback param_callback;
+  /*add for support prepare_execute protocol*/
+  unsigned int  bind_size;
+  unsigned int  iteration_count;
+  unsigned int  execute_mode;
+  unsigned int  check_sum;
+  my_bool       use_prepare_execute;
+  /*
+   * Added for RETURNING...INTO to handle the resultset 
+   **/
+  my_bool       is_handle_returning_into; /* is handling the result of returning into */
+  my_bool       has_added_user_fields;    /* will be set if user's field info has added */
+  my_bool       is_pl_out_resultset;      /* will be set for resultset of PL out parameters. OBServer will be set since 3.2.2 */
+  /*end add for support prepare_execute protocol*/
+  unsigned short orientation;  /* i.e. OCI_FETCH_ABSOLUTE - Fetches the row number (specified by fetch_offset parameter) in the result set using absolute positioning.*/
+  int            fetch_offset; /* The offset to be used with the orientation parameter for changing the current row position */
+  unsigned long  ext_flag; /* prepare_execute extend flag which need to be send to OBServer  */
+  MA_MEM_ROOT       param_fields_mem_root;       /* param root allocations */
 };
+/*add for support send PLArray maxrarr_len*/
+enum enum_mysql_send_plarray_maxrarrlen_flag
+{
+  SEND_PLARRAY_MAXRARRLEN_FORCE_CLOSE = 0,
+  SEND_PLARRAY_MAXRARRLEN_AUTO_OPEN,
+  SEND_PLARRAY_MAXRARRLEN_FORCE_OPEN,
+  SEND_PLARRAY_MAXRARRLEN_FLAG_MAX,
+};
+my_bool determine_send_plarray_maxrarr_len(MYSQL *mysql);
+my_bool get_support_send_plarray_maxrarr_len(MYSQL *mysql);
+/*end for support send PLArray maxrarr_len*/
+
+/*add for support plarray bindbyname */
+enum enum_mysql_plarray_bindbyname
+{
+  PLARRAY_BINDBYNAME_FORCE_CLOSE = 0,
+  PLARRAY_BINDBYNAME_AUTO_OPEN,
+  PLARRAY_BINDBYNAME_FORCE_OPEN,
+  PLARRAY_BINDBYNAME_FLAG_MAX,
+};
+my_bool determine_plarray_bindbyname(MYSQL *mysql);
+my_bool get_support_plarray_bindbyname(MYSQL *mysql);
+/*end for support plarray bindbyname */
+
+/*add for support protocol ob20*/
+enum enum_ob20_protocol
+{
+  PROTOCOL_OB20_FORCE_CLOSE = 0,
+  PROTOCOL_OB20_AUTO_OPEN,
+  PROTOCOL_OB20_FORCE_OPEN,
+  PROTOCOL_OB20_FLAY_MAX
+};
+my_bool determine_protocol_ob20(MYSQL *mysql);
+my_bool get_use_protocol_ob20(MYSQL *mysql);
+
+enum enum_full_link_trace
+{
+  PROTOCOL_FLT_FORCE_CLOSE = 0,
+  PROTOCOL_FLT_AUTO_OPEN,
+  PROTOCOL_FLT_FORCE_OPEN,
+  PROTOCOL_FLT_FLAY_MAX
+};
+my_bool determine_full_link_trace(MYSQL *mysql);
+my_bool get_use_full_link_trace(MYSQL *mysql);
+
+uint32_t ob_crc32(uint64_t crc, const char *buf, int64_t len);
+uint64_t ob_crc64(uint64_t crc, const char *buf, int64_t len);
+/*end for support protocol ob20*/
+
+/* add for support bindbyname for plarray */
+struct prepare_extend_args_t
+{
+  unsigned int params_count;  // pass params_ount from caller
+};
+typedef struct prepare_extend_args_t PREPARE_EXTEND_ARGS;
+// todo: add a switch to accept args
+/* end for support bindbyname for plarray */
+
+enum enum_mysql_prepare_execute_flag
+{
+  PREPARE_EXECUTE_FORCE_CLOSE = 0,
+  PREPARE_EXECUTE_AUTO_OPEN,
+  PREPARE_EXECUTE_FORCE_OPEN,
+  PREPARE_EXECUTE_FLAG_MAX
+};
+/*add for support prepare_execute protocol*/
+my_bool determine_use_prepare_execute(MYSQL *mysql);
+my_bool get_support_send_fetch_flag(MYSQL *mysql);
+my_bool get_use_prepare_execute(MYSQL* msyql);
+my_bool get_use_preapre_execute(MYSQL* msyql);
+/*end add for support prepare_execute protocol*/
+/*add for support new prepare_execute mode*/
+//same value as OCI
+#define EXECUTE_BATCH_MODE             0x00000001 /* batch the oci stmt for exec */
+#define EXECUTE_EXACT_FETCH            0x00000002  /* fetch exact rows specified */
+/* #define                         0x00000004                      available */
+#define EXECUTE_STMT_SCROLLABLE_READONLY \
+                                   0x00000008 /* if result set is scrollable */
+#define EXECUTE_DESCRIBE_ONLY          0x00000010 /* only describe the statement */
+#define EXECUTE_COMMIT_ON_SUCCESS      0x00000020  /* commit, if successful exec */
+#define EXECUTE_NON_BLOCKING           0x00000040                /* non-blocking */
+#define EXECUTE_BATCH_ERRORS           0x00000080  /* batch errors in array dmls */
+#define EXECUTE_PARSE_ONLY             0x00000100    /* only parse the statement */
+#define EXECUTE_EXACT_FETCH_RESERVED_1 0x00000200                    /* reserved */
+/*add for support new prepare_execute mode*/
+
+/*add for support fetch flag*/
+#define FETCH_RETURN_EXTRA_OK   0x00000001L
+#define FETCH_HAS_PIECE_COLUMN  0x00000002L
+//same as oci fetch orientation
+#define CURSOR_FETCH_DEFAULT    0x00000000
+#define CURSOR_FETCH_CURRENT    0x00000001      /* refetching current position  */
+#define CURSOR_FETCH_NEXT       0x00000002                          /* next row */
+#define CURSOR_FETCH_FIRST      0x00000004       /* first row of the result set */
+#define CURSOR_FETCH_LAST       0x00000008    /* the last row of the result set */
+#define CURSOR_FETCH_PRIOR      0x00000010  /* previous row relative to current */
+#define CURSOR_FETCH_ABSOLUTE   0x00000020        /* absolute offset from first */
+#define CURSOR__FETCH_RELATIVE   0x00000040        /* offset relative to current */
+#define CURSOR__FETCH_RESERVED_1 0x00000080                          /* reserved */
+#define CURSOR__FETCH_RESERVED_2 0x00000100                          /* reserved */
+#define CURSOR__FETCH_RESERVED_3 0x00000200                          /* reserved */
+#define CURSOR__FETCH_RESERVED_4 0x00000400                          /* reserved */
+#define CURSOR__FETCH_RESERVED_5 0x00000800                          /* reserved */
+#define CURSOR__FETCH_RESERVED_6 0x00001000                          /* reserved */
+/*end add for support fetch flag*/
+
+#define NEED_DATA_AT_EXEC_FLAG   0x00000001
 
 typedef void (*ps_field_fetch_func)(MYSQL_BIND *r_param, const MYSQL_FIELD * field, unsigned char **row);
 typedef struct st_mysql_perm_bind {
@@ -307,7 +460,7 @@ typedef struct st_mysql_perm_bind {
   unsigned long max_len;
 } MYSQL_PS_CONVERSION;
 
-extern MYSQL_PS_CONVERSION mysql_ps_fetch_functions[MYSQL_TYPE_GEOMETRY + 1];
+extern MYSQL_PS_CONVERSION mysql_ps_fetch_functions[MYSQL_TYPE_GEOMETRY + 2];
 unsigned long ma_net_safe_read(MYSQL *mysql);
 void mysql_init_ps_subsystem(void);
 unsigned long net_field_length(unsigned char **packet);
@@ -319,9 +472,38 @@ int ma_simple_command(MYSQL *mysql,enum enum_server_command command, const char 
 MYSQL_STMT * STDCALL mysql_stmt_init(MYSQL *mysql);
 int STDCALL mysql_stmt_prepare(MYSQL_STMT *stmt, const char *query, unsigned long length);
 int STDCALL mysql_stmt_execute(MYSQL_STMT *stmt);
+int STDCALL mysql_stmt_prepare_v2(MYSQL_STMT *stmt, const char *query, unsigned long length, void* extend_arg);
+int STDCALL mysql_stmt_execute_v2(MYSQL_STMT *stmt, const char *query, unsigned long length, unsigned int iteration_count, int execute_mode, void* extend_arg);
 int STDCALL mysql_stmt_fetch(MYSQL_STMT *stmt);
 int STDCALL mysql_stmt_fetch_column(MYSQL_STMT *stmt, MYSQL_BIND *bind_arg, unsigned int column, unsigned long offset);
 int STDCALL mysql_stmt_store_result(MYSQL_STMT *stmt);
+
+my_bool STDCALL mysql_stmt_send_piece_data(MYSQL_STMT *stmt, unsigned int param_number,
+                                           const char *data, unsigned long length,
+                                           char piece_type, char is_null);
+my_bool STDCALL mysql_stmt_read_piece_data(MYSQL_STMT *stmt, unsigned int param_number,
+                                           unsigned short orientation, int scroll_offset,
+                                           unsigned long data_len, unsigned char *piece_type, unsigned long *ret_data_len);
+/* 
+ * add for RETURNING INTO resultset's flag
+ **/
+my_bool STDCALL is_returning_result(MYSQL_STMT *stmt);
+my_bool STDCALL has_added_user_fields(MYSQL_STMT *stmt);
+/* add pl out resultset flag, observer since 3.2.2 */
+my_bool STDCALL is_pl_out_result(MYSQL_STMT *stmt);
+
+unsigned long STDCALL stmt_pre_exe_req_ext_flag_get(MYSQL_STMT *stmt);
+void STDCALL stmt_pre_exe_req_ext_flag_set(MYSQL_STMT *stmt, unsigned long flag);
+
+/*
+ * add oracle_mode fetch method
+ */
+int STDCALL mysql_stmt_fetch_oracle_cursor(MYSQL_STMT *stmt);
+int STDCALL mysql_stmt_fetch_oracle_implicit_cursor(MYSQL_STMT *stmt, my_bool is_need_fetch_from_server);
+int STDCALL mysql_stmt_fetch_oracle_buffered_result(MYSQL_STMT *stmt);
+/*
+ * end add oracle_mode fetch method
+ */
 unsigned long STDCALL mysql_stmt_param_count(MYSQL_STMT * stmt);
 my_bool STDCALL mysql_stmt_attr_set(MYSQL_STMT *stmt, enum enum_stmt_attr_type attr_type, const void *attr);
 my_bool STDCALL mysql_stmt_attr_get(MYSQL_STMT *stmt, enum enum_stmt_attr_type attr_type, void *attr);
@@ -347,3 +529,5 @@ int STDCALL mysql_stmt_next_result(MYSQL_STMT *stmt);
 my_bool STDCALL mysql_stmt_more_results(MYSQL_STMT *stmt);
 int STDCALL mariadb_stmt_execute_direct(MYSQL_STMT *stmt, const char *stmt_str, size_t length);
 MYSQL_FIELD * STDCALL mariadb_stmt_fetch_fields(MYSQL_STMT *stmt);
+void end_server(MYSQL *mysql);
+void free_old_query(MYSQL *mysql);

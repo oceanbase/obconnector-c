@@ -1,7 +1,6 @@
 /****************************************************************************
    Copyright (C) 2012 Monty Program AB
    Copyright (c) 2021 OceanBase.
-   
    This library is free software; you can redistribute it and/or
    modify it under the terms of the GNU Library General Public
    License as published by the Free Software Foundation; either
@@ -51,7 +50,7 @@
 #include "mysql.h"
 #include <math.h> /* ceil() */
 #include <limits.h>
-
+#include "ob_complex.h"
 #ifdef WIN32
 #include <malloc.h>
 #endif
@@ -87,7 +86,7 @@
 
 #define YY_PART_YEAR 70
 
-MYSQL_PS_CONVERSION mysql_ps_fetch_functions[MYSQL_TYPE_GEOMETRY + 1];
+MYSQL_PS_CONVERSION mysql_ps_fetch_functions[MYSQL_TYPE_GEOMETRY + 2];
 my_bool mysql_ps_subsystem_initialized= 0;
 
 
@@ -531,6 +530,7 @@ static void convert_froma_string(MYSQL_BIND *r_param, char *buffer, size_t len)
     }
     break;
     case MYSQL_TYPE_LONG:
+    case MYSQL_TYPE_CURSOR:
     {
       longlong val= my_atoll(buffer, buffer + len, &error);
       *r_param->error=error ? 1 : r_param->is_unsigned ? NUMERIC_TRUNCATION(val, 0, UINT_MAX32) : NUMERIC_TRUNCATION(val, INT_MIN32, INT_MAX32) || error > 0;
@@ -578,6 +578,7 @@ static void convert_froma_string(MYSQL_BIND *r_param, char *buffer, size_t len)
     case MYSQL_TYPE_BLOB:
     case MYSQL_TYPE_DECIMAL:
     case MYSQL_TYPE_NEWDECIMAL:
+    case MYSQL_TYPE_OB_UROWID:
     default:
     {
       if (len >= r_param->offset)
@@ -618,6 +619,7 @@ static void convert_from_long(MYSQL_BIND *r_param, const MYSQL_FIELD *field, lon
       r_param->buffer_length= 2;
       break;
     case MYSQL_TYPE_LONG:
+    case MYSQL_TYPE_CURSOR:
       longstore(r_param->buffer, (int32)val);
       *r_param->error= r_param->is_unsigned ? NUMERIC_TRUNCATION(val, 0, UINT_MAX32) : NUMERIC_TRUNCATION(val, INT_MIN32, INT_MAX32);
       r_param->buffer_length= 4;
@@ -757,6 +759,7 @@ void ps_fetch_int32(MYSQL_BIND *r_param, const MYSQL_FIELD * const field,
       break; */
     case MYSQL_TYPE_INT24:
     case MYSQL_TYPE_LONG:
+    case MYSQL_TYPE_CURSOR:
       ps_fetch_from_1_to_8_bytes(r_param, field, row, 4);
     break; 
     default:
@@ -834,6 +837,7 @@ static void convert_from_float(MYSQL_BIND *r_param, const MYSQL_FIELD *field, fl
     }
     break; 
     case MYSQL_TYPE_LONG:
+    case MYSQL_TYPE_CURSOR:
     {
       if (r_param->is_unsigned)
       {
@@ -933,6 +937,7 @@ static void convert_from_double(MYSQL_BIND *r_param, const MYSQL_FIELD *field, d
     }
     break; 
     case MYSQL_TYPE_LONG:
+    case MYSQL_TYPE_CURSOR:
     {
       if (r_param->is_unsigned)
       {
@@ -1117,6 +1122,8 @@ void ps_fetch_oracle_timestamp(MYSQL_BIND *param,
   uint buffer_length = 0;
   uint length = net_field_length(row);
 
+  UNUSED(field);
+
   if (length > 16) {
     buffer_length = length - 16 + sizeof(ORACLE_TIME) + 2;
   } else {
@@ -1256,6 +1263,701 @@ void ps_fetch_datetime(MYSQL_BIND *r_param, const MYSQL_FIELD * field,
 }
 /* }}} */
 
+/*fetch ob_lob*/
+static void fill_ob_lob_locator(OB_LOB_LOCATOR *ob_lob_locator, uchar *row)
+{
+  ob_lob_locator->magic_code_ = uint4korr(row);
+  ob_lob_locator->version_ = uint4korr(row + 4);
+  ob_lob_locator->snapshot_version_ = sint8korr(row + 8);
+  ob_lob_locator->table_id_ = uint8korr(row + 16);
+  ob_lob_locator->column_id_ = uint4korr(row + 24);
+  ob_lob_locator->mode_ = uint2korr(row + 28);
+  ob_lob_locator->option_ = uint2korr(row + 30);
+  ob_lob_locator->payload_offset_ = uint4korr(row + 32);
+  ob_lob_locator->payload_size_ = uint4korr(row + 36);
+}
+
+static void fetch_result_ob_lob(MYSQL_BIND *param,
+                                const MYSQL_FIELD *field __attribute__((unused)),
+                                uchar **row)
+{
+  ulong length= net_field_length(row);
+
+  if (param->buffer_length <= 0
+      || param->buffer_length < MAX_OB_LOB_LOCATOR_HEADER_LENGTH
+      || length < MAX_OB_LOB_LOCATOR_HEADER_LENGTH) {
+    *param->error= 1;
+  } else {
+    OB_LOB_LOCATOR *ob_lob_locator = (OB_LOB_LOCATOR *)param->buffer;
+    ulong copy_length = MIN(param->buffer_length - MAX_OB_LOB_LOCATOR_HEADER_LENGTH, length - MAX_OB_LOB_LOCATOR_HEADER_LENGTH);
+    fill_ob_lob_locator(ob_lob_locator, *row);
+    memcpy(ob_lob_locator->data_, (*row) + MAX_OB_LOB_LOCATOR_HEADER_LENGTH, copy_length);
+    *param->error= copy_length + MAX_OB_LOB_LOCATOR_HEADER_LENGTH < length;
+  }
+
+  *param->length= length;
+  *row += length;
+}
+
+/*fetch_complex_type*/
+static void fetch_result_complex(MYSQL_BIND *param, void *buffer,
+                                 CHILD_TYPE *child, uchar **row);
+static void *fetch_result_complex_alloc_space(MYSQL_COMPLEX_BIND_BASIC *header,
+                                              MYSQL_BIND *param,
+                                              ulong length);
+static void fill_complex_type(MYSQL_BIND *param, void *buffer,
+                              CHILD_TYPE *child);
+static ulong get_complex_header_length(enum_types type) {
+  switch (type) {
+  case TYPE_OBJECT:
+    return sizeof(MYSQL_COMPLEX_BIND_OBJECT);
+  case TYPE_COLLECTION:
+    return sizeof(MYSQL_COMPLEX_BIND_ARRAY);
+  case TYPE_VARCHAR2:
+  case TYPE_CHAR:
+  case TYPE_RAW:
+    return sizeof(MYSQL_COMPLEX_BIND_STRING);
+  case TYPE_NUMBER:
+    return sizeof(MYSQL_COMPLEX_BIND_DECIMAL);
+  case TYPE_LONG:
+  case TYPE_LONGLONG:
+  case TYPE_TINY:
+  case TYPE_SHORT:
+  case TYPE_FLOAT:
+  case TYPE_DOUBLE:
+    return sizeof(MYSQL_COMPLEX_BIND_BASIC);
+  default:
+    return sizeof(MYSQL_COMPLEX_BIND_BASIC);
+  }
+}
+static void fetch_result_str_complex(MYSQL_COMPLEX_BIND_STRING *header,
+                                     MYSQL_BIND *param,
+                                     uchar **row)
+{
+  void *buffer;
+  ulong length;
+
+  length = net_field_length(row);
+
+  //include end '\0'
+  buffer = fetch_result_complex_alloc_space((MYSQL_COMPLEX_BIND_HEADER *)header, param, length + 1);
+  if (NULL == buffer) {
+    return;
+  }
+
+  memcpy(buffer, (char *)*row, length);
+  ((uchar *)buffer)[length]= '\0';
+  header->length = length;
+  *row+= length;
+  return;
+}
+static void fetch_result_long_complex(MYSQL_COMPLEX_BIND_BASIC *header,
+                                     MYSQL_BIND *param,
+                                     uchar **row)
+{
+  void *buffer;
+
+  buffer = fetch_result_complex_alloc_space((MYSQL_COMPLEX_BIND_HEADER *)header, param, 4);
+  if (NULL == buffer) {
+    return;
+  }
+  longstore(buffer, ((uint32)sint4korr(*row)));
+  *row += 4;
+
+  return;
+}
+static void fetch_result_longlong_complex(MYSQL_COMPLEX_BIND_BASIC *header,
+                                          MYSQL_BIND *param,
+                                          uchar **row)
+{
+  void *buffer;
+  ulonglong val;
+
+  buffer = fetch_result_complex_alloc_space((MYSQL_COMPLEX_BIND_HEADER *)header, param, 8);
+  if (NULL == buffer) {
+    return;
+  }
+
+  val= (ulonglong)sint8korr(*row);
+  longlongstore(buffer, val);
+  *row += 8;
+
+  return;
+}
+static void fetch_result_short_complex(MYSQL_COMPLEX_BIND_BASIC *header,
+                                     MYSQL_BIND *param,
+                                     uchar **row)
+{
+  void *buffer;
+
+  buffer = fetch_result_complex_alloc_space((MYSQL_COMPLEX_BIND_HEADER *)header, param, 2);
+  if (NULL == buffer) {
+    return;
+  }
+  shortstore(buffer, ((ushort)sint2korr(*row)));
+  *row += 2;
+
+  return;
+}
+static void fetch_result_tiny_complex(MYSQL_COMPLEX_BIND_BASIC *header,
+                                      MYSQL_BIND *param,
+                                      uchar **row)
+{
+  void *buffer;
+
+  buffer = fetch_result_complex_alloc_space((MYSQL_COMPLEX_BIND_HEADER *)header, param, 1);
+  if (NULL == buffer) {
+    return;
+  }
+  *(uchar *)buffer= **row;
+  *row += 1;
+
+  return;
+}
+static void fetch_result_float_complex(MYSQL_COMPLEX_BIND_BASIC *header,
+                                       MYSQL_BIND *param,
+                                       uchar **row)
+{
+  void *buffer;
+  float *value;
+
+  buffer = fetch_result_complex_alloc_space((MYSQL_COMPLEX_BIND_HEADER *)header, param, 4);
+  if (NULL == buffer) {
+    return;
+  }
+  value= (float *)buffer;
+  float4get(*value, *row);
+
+  *row += 4;
+  return;
+}
+static void fetch_result_double_complex(MYSQL_COMPLEX_BIND_BASIC *header,
+                                       MYSQL_BIND *param,
+                                       uchar **row)
+{
+  void *buffer;
+  double *value;
+
+  buffer = fetch_result_complex_alloc_space((MYSQL_COMPLEX_BIND_HEADER *)header, param, 8);
+  if (NULL == buffer) {
+    return;
+  }
+  value= (double *)buffer;
+  float8get(*value, *row);
+
+  *row += 8;
+  return;
+}
+
+
+static void fetch_result_object_complex(MYSQL_COMPLEX_BIND_OBJECT *header,
+                                        MYSQL_BIND *param,
+                                        uchar **row)
+{
+  void *buffer = NULL;
+  ulong length = 0;
+  uint i = 0;
+  COMPLEX_TYPE_OBJECT *object = NULL;
+  struct st_complex_type *complex_type = NULL;
+  uchar *null_ptr, bit;
+
+  complex_type = get_complex_type(param->mysql, header->owner_name, header->type_name);
+
+  if (complex_type == NULL) {
+    *param->error= 1;
+    return;
+  }
+
+  object = (COMPLEX_TYPE_OBJECT *)complex_type;
+
+  for (i = 0; i < object->attr_no; i++) {
+    length += get_complex_header_length(object->child[i].type);
+  }
+
+  buffer = fetch_result_complex_alloc_space((MYSQL_COMPLEX_BIND_BASIC *)header, param, length);
+  if (NULL == buffer) {
+    return;
+  }
+
+  null_ptr = *row;
+  *row += (object->attr_no + 9)/8;    /* skip null bits */
+  bit = 4;          /* first 2 bits are reserved */
+
+  for (i = 0; i < object->attr_no; i++) {
+    fill_complex_type(param, buffer, &(object->child[i]));
+
+    if (*null_ptr & bit) {
+      ((MYSQL_COMPLEX_BIND_BASIC *)buffer)->is_null = 1;
+    } else {
+      fetch_result_complex(param, buffer, &(object->child[i]), row);
+    }
+
+    buffer = (char*)buffer + get_complex_header_length(object->child[i].type);
+
+    if (!((bit<<=1) & 255)) {
+      bit= 1;         /* To next uchar */
+      null_ptr++;
+    }
+  }
+
+  header->length = (char*)buffer - (char*)header->buffer;
+  return;
+}
+static void read_binary_datetime(MYSQL_TIME *tm, uchar **pos)
+{
+  uint length= net_field_length(pos);
+
+  if (length)
+  {
+    uchar *to= *pos;
+
+    tm->neg=    0;
+    tm->year=   (uint) sint2korr(to);
+    tm->month=  (uint) to[2];
+    tm->day=    (uint) to[3];
+
+    if (length > 4)
+    {
+      tm->hour=   (uint) to[4];
+      tm->minute= (uint) to[5];
+      tm->second= (uint) to[6];
+    }
+    else
+      tm->hour= tm->minute= tm->second= 0;
+    tm->second_part= (length > 7) ? (ulong) sint4korr(to+7) : 0;
+    tm->time_type= MYSQL_TIMESTAMP_DATETIME;
+
+    *pos+= length;
+  }
+  else
+  {
+    memset(tm, 0, sizeof(*tm));
+    tm->time_type= MYSQL_TIMESTAMP_DATETIME;
+  }
+}
+static void fetch_result_datetime_complex(MYSQL_COMPLEX_BIND_BASIC *header,
+                                          MYSQL_BIND *param,
+                                          uchar **row)
+{
+  MYSQL_TIME *tm = NULL;
+
+  tm = fetch_result_complex_alloc_space(header, param, sizeof(MYSQL_TIME));
+  if (NULL == tm) {
+    return;
+  }
+
+  read_binary_datetime(tm, row);
+  return;
+}
+
+static void fetch_result_bin_complex(MYSQL_COMPLEX_BIND_STRING *header,
+                                     MYSQL_BIND *param,
+                                     uchar **row)
+{
+  void *buffer;
+  ulong length;
+
+  length = net_field_length(row);
+
+  buffer = fetch_result_complex_alloc_space((MYSQL_COMPLEX_BIND_HEADER *)header, param, length);
+  if (NULL == buffer) {
+    return;
+  }
+
+  memcpy(buffer, (char *)*row, length);
+  header->length = length;
+  *row+= length;
+  return;
+}
+static void fetch_result_array_complex(MYSQL_COMPLEX_BIND_ARRAY *header,
+                                       MYSQL_BIND *param,
+                                       uchar **row,
+                                       COMPLEX_TYPE *complex_type)
+{
+  void *buffer = NULL;
+  ulong length = 0;
+  uint num = 0;
+  uint i = 0;
+  COMPLEX_TYPE_COLLECTION *object = NULL;
+  uchar *null_ptr, bit;
+
+  if (NULL == complex_type) {
+    complex_type = get_complex_type(param->mysql, header->owner_name, header->type_name);
+
+    if (complex_type == NULL) {
+      *param->error= 1;
+      return;
+    }
+  } else {/* 匿名数组本地存储信息 */}
+
+  object = (COMPLEX_TYPE_COLLECTION *)complex_type;
+
+  num = net_field_length(row);
+  length = num * get_complex_header_length(object->child.type);
+
+  buffer = fetch_result_complex_alloc_space((MYSQL_COMPLEX_BIND_BASIC *)header, param, length);
+  if (NULL == buffer) {
+    return;
+  }
+
+  null_ptr = *row;
+  *row += (num + 9)/8;    /* skip null bits */
+  bit = 4;          /* first 2 bits are reserved */
+
+  for (i = 0; i < num; i++) {
+    fill_complex_type(param, buffer, &(object->child));
+
+    if (*null_ptr & bit) {
+      ((MYSQL_COMPLEX_BIND_BASIC *)buffer)->is_null = 1;
+    } else {
+      fetch_result_complex(param, buffer, &(object->child), row);
+    }
+
+    buffer = (char*)buffer + get_complex_header_length(object->child.type);
+
+    if (!((bit<<=1) & 255)) {
+      bit= 1;         /* To next uchar */
+      null_ptr++;
+    }
+  }
+
+  header->length = num;
+  return;
+}
+static void fetch_result_complex(MYSQL_BIND *param, void *buffer,
+                                 CHILD_TYPE *child, uchar **row)
+{
+  switch (child->type) {
+  case TYPE_NUMBER:
+    {
+    fetch_result_str_complex((MYSQL_COMPLEX_BIND_STRING *)buffer, param, row);
+    break;
+    }
+  case TYPE_VARCHAR2:
+  case TYPE_CHAR:
+    {
+    fetch_result_str_complex((MYSQL_COMPLEX_BIND_STRING *)buffer, param, row);
+    break;
+    }
+  case TYPE_RAW:
+    {
+    fetch_result_bin_complex((MYSQL_COMPLEX_BIND_STRING *)buffer, param, row);
+    break;
+    }
+  case TYPE_DATE:
+    {
+    fetch_result_datetime_complex((MYSQL_COMPLEX_BIND_BASIC *)buffer, param, row);
+    break;
+    }
+  case TYPE_OBJECT:
+    {
+    fetch_result_object_complex((MYSQL_COMPLEX_BIND_OBJECT *)buffer, param, row);
+    break;
+    }
+  case TYPE_COLLECTION:
+    {
+    fetch_result_array_complex((MYSQL_COMPLEX_BIND_ARRAY *)buffer, param, row, NULL);
+    break;
+    }
+  case TYPE_LONG:
+    {
+    fetch_result_long_complex((MYSQL_COMPLEX_BIND_BASIC *)buffer, param, row);
+    break;
+    }
+  case TYPE_LONGLONG:
+    {
+    fetch_result_longlong_complex((MYSQL_COMPLEX_BIND_BASIC *)buffer, param, row);
+    break;
+    }
+  case TYPE_TINY:
+    {
+    fetch_result_tiny_complex((MYSQL_COMPLEX_BIND_BASIC *)buffer, param, row);
+    break;
+    }
+  case TYPE_SHORT:
+    {
+    fetch_result_short_complex((MYSQL_COMPLEX_BIND_BASIC *)buffer, param, row);
+    break;
+    }
+  case TYPE_FLOAT:
+    {
+    fetch_result_float_complex((MYSQL_COMPLEX_BIND_BASIC *)buffer, param, row);
+    break;
+    }
+  case TYPE_DOUBLE:
+    {
+    fetch_result_double_complex((MYSQL_COMPLEX_BIND_BASIC *)buffer, param, row);
+    break;
+    }
+  default:
+    *param->error= 1;
+    break;
+  }
+  return;
+}
+static void *fetch_result_complex_alloc_space(MYSQL_COMPLEX_BIND_BASIC *header,
+                                              MYSQL_BIND *param,
+                                              ulong length)
+{
+  void *buffer = NULL;
+  (*param->length) += length;
+  if (1 == *param->error) {
+    buffer = (void *)ma_alloc_root(&param->bind_alloc, length);
+  } else if (param->offset + length > param->buffer_length) {
+    *param->error= 1;
+    buffer = (void *)ma_alloc_root(&param->bind_alloc, length);
+  } else {
+    buffer = (char*)param->buffer + param->offset;
+  }
+
+  header->buffer = buffer;
+  if (header->buffer) {
+    memset(header->buffer, 0, length);
+    param->offset += length;
+  }
+
+  return (header->buffer);
+}
+static uint mysql_type_to_object_type(uint mysql_type)
+{
+  enum_types object_type;
+  switch ((enum_field_types)mysql_type) {
+  case MYSQL_TYPE_LONG:
+  case MYSQL_TYPE_CURSOR:
+    {
+      object_type = TYPE_LONG;
+      break;
+    }
+  case MYSQL_TYPE_LONGLONG:
+    {
+      object_type = TYPE_LONGLONG;
+      break;
+    }
+  case MYSQL_TYPE_TINY:
+    {
+      object_type = TYPE_TINY;
+      break;
+    }
+  case MYSQL_TYPE_SHORT:
+    {
+      object_type = TYPE_SHORT;
+      break;
+    }
+  case MYSQL_TYPE_FLOAT:
+    {
+      object_type = TYPE_FLOAT;
+      break;
+    }
+  case MYSQL_TYPE_DOUBLE:
+    {
+      object_type = TYPE_DOUBLE;
+      break;
+    }
+  case MYSQL_TYPE_NEWDECIMAL:
+    {
+      object_type = TYPE_NUMBER;
+      break;
+    }
+  case MYSQL_TYPE_VARCHAR:
+  case MYSQL_TYPE_VAR_STRING:
+  case MYSQL_TYPE_STRING:
+    {
+      object_type = TYPE_VARCHAR2;
+      break;
+    }
+  case MYSQL_TYPE_OB_RAW:
+    {
+      object_type = TYPE_RAW;
+      break;
+    }
+  case MYSQL_TYPE_DATETIME:
+    {
+      object_type = TYPE_DATE;
+      break;
+    }
+  case MYSQL_TYPE_OBJECT:
+    {
+      object_type = TYPE_OBJECT;
+      break;
+    }
+  case MYSQL_TYPE_ARRAY:
+    {
+      object_type = TYPE_COLLECTION;
+      break;
+    }
+  default:
+    object_type = TYPE_UNKNOW;
+    break;
+  }
+  return object_type;
+}
+static void fill_complex_type(MYSQL_BIND *param, void *buffer,
+                              CHILD_TYPE *child)
+{
+
+  switch (child->type) {
+  case TYPE_NUMBER:
+    {
+    MYSQL_COMPLEX_BIND_DECIMAL *header = (MYSQL_COMPLEX_BIND_DECIMAL *)buffer;
+    header->buffer_type = MYSQL_TYPE_NEWDECIMAL;
+    break;
+    }
+  case TYPE_VARCHAR2:
+  case TYPE_CHAR:
+    {
+    MYSQL_COMPLEX_BIND_STRING *header = (MYSQL_COMPLEX_BIND_STRING *)buffer;
+    header->buffer_type = MYSQL_TYPE_VARCHAR;
+    break;
+    }
+  case TYPE_RAW:
+    {
+    MYSQL_COMPLEX_BIND_STRING *header = (MYSQL_COMPLEX_BIND_STRING *)buffer;
+    header->buffer_type = MYSQL_TYPE_OB_RAW;
+    break;
+    }
+  case TYPE_DATE:
+    {
+    MYSQL_COMPLEX_BIND_BASIC *header = (MYSQL_COMPLEX_BIND_BASIC *)buffer;
+    header->buffer_type = MYSQL_TYPE_DATETIME;
+    break;
+    }
+  case TYPE_LONG:
+    {
+    MYSQL_COMPLEX_BIND_BASIC *header = (MYSQL_COMPLEX_BIND_BASIC *)buffer;
+    header->buffer_type = MYSQL_TYPE_LONG;
+    break;
+    }
+  case TYPE_LONGLONG:
+    {
+    MYSQL_COMPLEX_BIND_BASIC *header = (MYSQL_COMPLEX_BIND_BASIC *)buffer;
+    header->buffer_type = MYSQL_TYPE_LONGLONG;
+    break;
+    }
+  case TYPE_TINY:
+    {
+    MYSQL_COMPLEX_BIND_BASIC *header = (MYSQL_COMPLEX_BIND_BASIC *)buffer;
+    header->buffer_type = MYSQL_TYPE_TINY;
+    break;
+    }
+  case TYPE_SHORT:
+    {
+    MYSQL_COMPLEX_BIND_BASIC *header = (MYSQL_COMPLEX_BIND_BASIC *)buffer;
+    header->buffer_type = MYSQL_TYPE_SHORT;
+    break;
+    } 
+  case TYPE_FLOAT:
+    {
+    MYSQL_COMPLEX_BIND_BASIC *header = (MYSQL_COMPLEX_BIND_BASIC *)buffer;
+    header->buffer_type = MYSQL_TYPE_FLOAT;
+    break;
+    }
+  case TYPE_DOUBLE:
+    {
+    MYSQL_COMPLEX_BIND_BASIC *header = (MYSQL_COMPLEX_BIND_BASIC *)buffer;
+    header->buffer_type = MYSQL_TYPE_DOUBLE;
+    break;
+    }
+  case TYPE_OBJECT:
+    {
+    MYSQL_COMPLEX_BIND_OBJECT *header = (MYSQL_COMPLEX_BIND_OBJECT *)buffer;
+    header->buffer_type = MYSQL_TYPE_OBJECT;
+    header->type_name = child->object->type_name;
+    header->owner_name = child->object->owner_name;
+    break;
+    }
+  case TYPE_COLLECTION:
+    {
+    MYSQL_COMPLEX_BIND_ARRAY *header = (MYSQL_COMPLEX_BIND_ARRAY *)buffer;
+    header->buffer_type = MYSQL_TYPE_ARRAY;
+    header->type_name = child->object->type_name;
+    header->owner_name = child->object->owner_name;
+    break;
+    }
+  default:
+    *param->error= 1;
+    break;
+  }
+  return;
+}
+static void fetch_result_type_complex(MYSQL_COMPLEX_BIND_OBJECT *header,
+                                      MYSQL_BIND *param,
+                                      uchar **row,
+                                      COMPLEX_TYPE *complex_type)
+{
+  if (NULL == complex_type) {
+    complex_type = get_complex_type(param->mysql, header->owner_name, header->type_name);
+    if (NULL == complex_type) {
+      *param->error= 1;
+      return;
+    }
+  } else { /*匿名数组，meta信息不能通过server查询，本地传入 */ }
+
+  if (TYPE_OBJECT == complex_type->type) {
+    MYSQL_COMPLEX_BIND_OBJECT *buffer = fetch_result_complex_alloc_space((MYSQL_COMPLEX_BIND_BASIC *)header,
+            param, sizeof(MYSQL_COMPLEX_BIND_OBJECT));
+
+    if (NULL == buffer) {
+      return;
+    }
+
+    buffer->owner_name = header->owner_name;
+    buffer->type_name = header->type_name;
+    buffer->buffer_type = MYSQL_TYPE_OBJECT;
+
+    fetch_result_object_complex(buffer, param, row);
+  } else if (TYPE_COLLECTION == complex_type->type) {
+    MYSQL_COMPLEX_BIND_ARRAY *buffer = fetch_result_complex_alloc_space((MYSQL_COMPLEX_BIND_BASIC *)header,
+            param, sizeof(MYSQL_COMPLEX_BIND_ARRAY));
+
+    if (NULL == buffer) {
+      return;
+    }
+
+    buffer->owner_name = header->owner_name;
+    buffer->type_name = header->type_name;
+    buffer->buffer_type = MYSQL_TYPE_ARRAY;
+
+    fetch_result_array_complex(buffer, param, row, complex_type);
+  }
+
+  return;
+}
+
+static void ps_fetch_result_type(MYSQL_BIND *param,
+                              const MYSQL_FIELD *field,
+                              uchar **row)
+{
+  MYSQL_COMPLEX_BIND_OBJECT header;
+
+  (*param->length) = 0;
+  param->offset = 0;
+  ma_init_alloc_root(&param->bind_alloc, 2048, 0);
+
+  header.owner_name = field->owner_name;
+  header.type_name = field->type_name;
+
+  if (NULL == header.owner_name && NULL == header.type_name) {
+    COMPLEX_TYPE_COLLECTION complex_type;
+    complex_type.header.type = TYPE_COLLECTION;
+    complex_type.header.owner_name[0] = '\0';
+    complex_type.header.type_name[0] = '\0';
+    complex_type.header.version = field->version;
+    complex_type.header.is_valid = TRUE;
+    complex_type.child.type = (enum_types)mysql_type_to_object_type(field->elem_type);
+
+    if (TYPE_UNKNOW == complex_type.child.type) {
+      *param->error = 1;
+    } else {
+      fetch_result_type_complex(&header, param, row, (COMPLEX_TYPE *)&complex_type);
+    }
+  } else {
+    fetch_result_type_complex(&header, param, row, NULL);
+  }
+
+  ma_free_root(&param->bind_alloc, MYF(0));
+  return;
+}
+
 /* {{{ ps_fetch_string */
 static
 void ps_fetch_string(MYSQL_BIND *r_param,
@@ -1304,6 +2006,19 @@ void ps_fetch_bin(MYSQL_BIND *r_param,
 }
 /* }}} */
 
+/* {{{ ps_fetch_result_skip_direct */
+static
+void ps_fetch_result_skip_direct(MYSQL_BIND *r_param,
+             const MYSQL_FIELD *field,
+             unsigned char **row)
+{
+  if (NULL != r_param) {
+    (*r_param->skip_result)(r_param, (MYSQL_FIELD *)field, row);
+    *r_param->error= 0;
+  }
+}
+/* }}} */
+
 /* {{{ _mysqlnd_init_ps_subsystem */
 void mysql_init_ps_subsystem(void)
 {
@@ -1331,6 +2046,10 @@ void mysql_init_ps_subsystem(void)
   mysql_ps_fetch_functions[MYSQL_TYPE_LONG].func    = ps_fetch_int32;
   mysql_ps_fetch_functions[MYSQL_TYPE_LONG].pack_len  = 4;
   mysql_ps_fetch_functions[MYSQL_TYPE_LONG].max_len  = 11;
+
+  mysql_ps_fetch_functions[MYSQL_TYPE_CURSOR].func    = ps_fetch_int32; /* parse cursor it with type of INT32 */
+  mysql_ps_fetch_functions[MYSQL_TYPE_CURSOR].pack_len  = 4;
+  mysql_ps_fetch_functions[MYSQL_TYPE_CURSOR].max_len  = 11;
 
   mysql_ps_fetch_functions[MYSQL_TYPE_LONGLONG].func  = ps_fetch_int64;
   mysql_ps_fetch_functions[MYSQL_TYPE_LONGLONG].pack_len= 8;
@@ -1421,6 +2140,18 @@ void mysql_init_ps_subsystem(void)
   mysql_ps_fetch_functions[MYSQL_TYPE_NEWDECIMAL].pack_len  = MYSQL_PS_SKIP_RESULT_STR;
   mysql_ps_fetch_functions[MYSQL_TYPE_NEWDECIMAL].max_len  = -1;
 
+  mysql_ps_fetch_functions[MYSQL_TYPE_OB_NUMBER_FLOAT].func    = ps_fetch_string;
+  mysql_ps_fetch_functions[MYSQL_TYPE_OB_NUMBER_FLOAT].pack_len  = MYSQL_PS_SKIP_RESULT_STR;
+  mysql_ps_fetch_functions[MYSQL_TYPE_OB_NUMBER_FLOAT].max_len  = -1;
+
+  mysql_ps_fetch_functions[MYSQL_TYPE_OB_NVARCHAR2].func    = ps_fetch_string;
+  mysql_ps_fetch_functions[MYSQL_TYPE_OB_NVARCHAR2].pack_len  = MYSQL_PS_SKIP_RESULT_STR;
+  mysql_ps_fetch_functions[MYSQL_TYPE_OB_NVARCHAR2].max_len  = -1;
+
+  mysql_ps_fetch_functions[MYSQL_TYPE_OB_NCHAR].func    = ps_fetch_string;
+  mysql_ps_fetch_functions[MYSQL_TYPE_OB_NCHAR].pack_len  = MYSQL_PS_SKIP_RESULT_STR;
+  mysql_ps_fetch_functions[MYSQL_TYPE_OB_NCHAR].max_len  = -1;
+
   mysql_ps_fetch_functions[MYSQL_TYPE_ENUM].func    = ps_fetch_string;
   mysql_ps_fetch_functions[MYSQL_TYPE_ENUM].pack_len  = MYSQL_PS_SKIP_RESULT_STR;
   mysql_ps_fetch_functions[MYSQL_TYPE_ENUM].max_len  = -1;
@@ -1429,9 +2160,35 @@ void mysql_init_ps_subsystem(void)
   mysql_ps_fetch_functions[MYSQL_TYPE_SET].pack_len    = MYSQL_PS_SKIP_RESULT_STR;
   mysql_ps_fetch_functions[MYSQL_TYPE_SET].max_len  = -1;
 
+  mysql_ps_fetch_functions[MYSQL_TYPE_OB_UROWID].func      = ps_fetch_string;
+  mysql_ps_fetch_functions[MYSQL_TYPE_OB_UROWID].pack_len    = MYSQL_PS_SKIP_RESULT_STR;
+  mysql_ps_fetch_functions[MYSQL_TYPE_OB_UROWID].max_len  = -1;
+
+  mysql_ps_fetch_functions[MYSQL_TYPE_ORA_BLOB].func      = fetch_result_ob_lob;
+  mysql_ps_fetch_functions[MYSQL_TYPE_ORA_BLOB].pack_len    = MYSQL_PS_SKIP_RESULT_STR;
+  mysql_ps_fetch_functions[MYSQL_TYPE_ORA_BLOB].max_len  = -1;
+
+
+  mysql_ps_fetch_functions[MYSQL_TYPE_ORA_CLOB].func      = fetch_result_ob_lob;
+  mysql_ps_fetch_functions[MYSQL_TYPE_ORA_CLOB].pack_len    = MYSQL_PS_SKIP_RESULT_STR;
+  mysql_ps_fetch_functions[MYSQL_TYPE_ORA_CLOB].max_len  = -1;
+
+  mysql_ps_fetch_functions[MYSQL_TYPE_OB_RAW].func      = ps_fetch_string;
+  mysql_ps_fetch_functions[MYSQL_TYPE_OB_RAW].pack_len  = MYSQL_PS_SKIP_RESULT_STR;
+  mysql_ps_fetch_functions[MYSQL_TYPE_OB_RAW].max_len   = -1;
+
+  mysql_ps_fetch_functions[MYSQL_TYPE_OBJECT].func    = ps_fetch_result_type;
+  mysql_ps_fetch_functions[MYSQL_TYPE_OBJECT].pack_len  = MYSQL_PS_SKIP_RESULT_STR;
+  mysql_ps_fetch_functions[MYSQL_TYPE_OBJECT].max_len  = -1;
+
   mysql_ps_fetch_functions[MYSQL_TYPE_GEOMETRY].func  = ps_fetch_string;
   mysql_ps_fetch_functions[MYSQL_TYPE_GEOMETRY].pack_len= MYSQL_PS_SKIP_RESULT_STR;
   mysql_ps_fetch_functions[MYSQL_TYPE_GEOMETRY].max_len  = -1;
+   
+  //It will be used in returning into
+  mysql_ps_fetch_functions[MAX_NO_FIELD_TYPES].func  = ps_fetch_result_skip_direct;
+  mysql_ps_fetch_functions[MAX_NO_FIELD_TYPES].pack_len= MYSQL_PS_SKIP_RESULT_STR;
+  mysql_ps_fetch_functions[MAX_NO_FIELD_TYPES].max_len  = -1;
 
   mysql_ps_subsystem_initialized= 1;
 }

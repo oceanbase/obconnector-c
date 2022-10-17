@@ -1,5 +1,5 @@
 /* Copyright (C) 2013 by MontyProgram AB
-
+   Copyright (c) 2021 OceanBase.
    This library is free software; you can redistribute it and/or
    modify it under the terms of the GNU Library General Public
    License as published by the Free Software Foundation; either
@@ -54,7 +54,7 @@ struct st_mysql_options_extension {
   char *ssl_crlpath;
   char *server_public_key_path;
   struct mysql_async_context *async_context;
-  HASH connect_attrs;
+  OB_HASH connect_attrs;
   size_t connect_attrs_len;
   void (*report_progress)(const MYSQL *mysql,
                           unsigned int stage,
@@ -74,7 +74,7 @@ struct st_mysql_options_extension {
   my_bool read_only;
   char *connection_handler;
   my_bool (*set_option)(MYSQL *mysql, const char *config_option, const char *config_value);
-  HASH userdata;
+  OB_HASH userdata;
   char *server_public_key;
   char *proxy_header;
   size_t proxy_header_len;

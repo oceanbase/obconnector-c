@@ -56,6 +56,7 @@ SET(MYSQL_LIB_SYMBOLS
  mysql_fetch_field
  mysql_fetch_field_direct
  mysql_fetch_fields
+ mysql_fetch_params
  mysql_fetch_lengths
  mysql_fetch_row
  mysql_field_count
@@ -131,8 +132,22 @@ SET(MYSQL_LIB_SYMBOLS
  mysql_stmt_errno
  mysql_stmt_error
  mysql_stmt_execute
+ get_support_send_fetch_flag
+ get_support_plarray_bindbyname
+ get_use_prepare_execute
+ get_use_preapre_execute
+ mysql_stmt_prepare_v2
+ mysql_stmt_execute_v2
+ has_added_user_fields
+ is_returning_result
+ stmt_pre_exe_req_ext_flag_set
+ is_pl_out_result
+ ob_time_to_date
  mysql_stmt_fetch
  mysql_stmt_fetch_column
+ mysql_stmt_fetch_oracle_cursor
+ mysql_stmt_fetch_oracle_implicit_cursor
+ mysql_stmt_fetch_oracle_buffered_result
  mysql_stmt_field_count
  mysql_stmt_free_result
  mysql_stmt_init
@@ -148,6 +163,8 @@ SET(MYSQL_LIB_SYMBOLS
  mysql_stmt_row_seek
  mysql_stmt_row_tell
  mysql_stmt_send_long_data
+ mysql_stmt_send_piece_data
+ mysql_stmt_read_piece_data
  mysql_stmt_sqlstate
  mysql_stmt_store_result
  mysql_store_result
@@ -255,6 +272,71 @@ SET(MARIADB_NONBLOCK_SYMBOLS
  mysql_stmt_store_result_start
  mysql_store_result_cont
  mysql_store_result_start
+#oci use
+ skip_param_complex
+ convert_type_to_complex
+ ob_time_to_date
+ ob_time_to_str_oracle_dfm
+ str_to_ob_time_oracle_dfm
+ hash_delete
+ hash_insert
+ hash_search
+ hash_element
+ hash_free
+ mysql_extension_init
+ _hash_init
+# thread
+ ob_thread_self
+ ob_thread_equal
+ ob_thread_attr_init
+ ob_thread_attr_destroy
+ ob_thread_attr_setstacksize
+ ob_thread_attr_setdetachstate
+ ob_thread_attr_getstacksize
+ ob_thread_yield
+ ob_thread_create
+ ob_thread_join
+ ob_thread_once
+ ob_thread_cancel
+ ob_thread_exit
+# ob20 
+ ob20_set_extra_info
+# full_link_trace
+ flt_set_module
+ flt_set_action
+ flt_set_client_info
+ flt_set_identifier
+ flt_get_control_level
+ flt_get_control_sample_pct
+ flt_get_control_record_policy
+ flt_get_control_print_spct
+ flt_get_control_slow_threshold
+
+ flt_deserialize_extra_info
+ flt_serialize_extra_info
+ flt_get_serialize_size_extra_info
+ ob_cond_init
+ ob_cond_destroy
+ ob_cond_timedwait
+ ob_cond_wait
+ ob_cond_signal
+ ob_cond_broadcast
+ ob_mutex_init
+ ob_mutex_lock
+ ob_mutex_trylock
+ ob_mutex_unlock
+ ob_mutex_destroy
+ ob_rw_init
+ ob_rw_destroy
+ ob_rw_rdlock
+ ob_rw_tryrdlock
+ ob_rw_wrlock
+ ob_rw_trywrlock
+ ob_rw_unlock
+ ob_create_thread_key
+ ob_delete_thread_key
+ ob_get_thread_key
+ ob_set_thread_key
 )
 
 # handle static plugins
@@ -294,6 +376,18 @@ ma_stmt_codec.c
 ma_string.c
 ma_dtoa.c
 mariadb_rpl.c
+ob_protocol20.c
+ob_bitmap.c
+ob_complex.c
+ob_strtoll10.c
+ob_oracle_format_models.c
+ob_thread.c
+ob_object.c
+ob_full_link_trace.c
+ob_serialize.c
+ob_rwlock.c
+ob_cond.c
+ob_thread_key.c
 ${CC_BINARY_DIR}/libmariadb/ma_client_plugin.c
 ma_io.c
 ${SSL_SOURCES}

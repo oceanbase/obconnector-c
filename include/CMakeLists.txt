@@ -5,9 +5,23 @@ SET(MARIADB_CLIENT_INCLUDES ${CC_SOURCE_DIR}/include/mariadb_com.h
                             ${CC_SOURCE_DIR}/include/ma_tls.h
                             ${CC_BINARY_DIR}/include/mariadb_version.h
                             ${CC_SOURCE_DIR}/include/ma_list.h
+                            ${CC_SOURCE_DIR}/include/ma_hash.h
+                            ${CC_SOURCE_DIR}/include/ma_global.h
+                            ${CC_SOURCE_DIR}/include/ma_string.h
+                            ${CC_SOURCE_DIR}/include/ma_config.h
+                            ${CC_SOURCE_DIR}/include/ma_sys.h
                             ${CC_SOURCE_DIR}/include/errmsg.h
                             ${CC_SOURCE_DIR}/include/mariadb_dyncol.h
                             ${CC_SOURCE_DIR}/include/mariadb_ctype.h
+                            ${CC_SOURCE_DIR}/include/ob_oralce_format_models.h
+                            ${CC_SOURCE_DIR}/include/ob_complex.h
+                            ${CC_SOURCE_DIR}/include/ob_thread.h
+                            ${CC_SOURCE_DIR}/include/ob_rwlock.h
+                            ${CC_SOURCE_DIR}/include/ob_cond.h
+                            ${CC_SOURCE_DIR}/include/ob_thread_key.h
+                            ${CC_SOURCE_DIR}/include/ob_protocol20.h
+                            ${CC_SOURCE_DIR}/include/ob_object.h
+                            ${CC_SOURCE_DIR}/include/ob_full_link_trace.h
                             ${CC_SOURCE_DIR}/include/mariadb_rpl.h
                             )
 IF(NOT IS_SUBPROJECT)

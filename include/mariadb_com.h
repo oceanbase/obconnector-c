@@ -28,7 +28,6 @@
 #ifndef _mysql_com_h
 #define _mysql_com_h
 
-
 #define NAME_CHAR_LEN   64
 #define NAME_LEN	256		/* Field/table name length */
 #define HOSTNAME_LENGTH 60
@@ -93,11 +92,29 @@ enum enum_server_command
   COM_DAEMON= 29,
   COM_UNSUPPORTED= 30,
   COM_RESET_CONNECTION = 31,
+  COM_STMT_PREPARE_EXECUTE = 0xa1,
+  COM_STMT_SEND_PIECE_DATA = 0xa2,
+  COM_STMT_GET_PIECE_DATA = 0xa3,
   COM_STMT_BULK_EXECUTE = 250,
   COM_RESERVED_1 = 254, /* former COM_MULTI, now removed */
   COM_END
 };
 
+enum enum_nls_time_type
+{
+  NLS_DATE_FORMAT,
+  NLS_TIMESTAMP_FORMAT,
+  NLS_TIMESTAMP_TZ_FORMAT,
+  NLS_TIME_MAX
+};
+
+enum enum_prepare_execute_extend_flag
+{
+  PRE_EXE_EXTEND_FLAG_RETURNING= 1,
+  PRE_EXE_EXTEND_FLAG_ADD_USER_FIELD= 1<<1,
+  PRE_EXE_EXTEND_FLAG_PLOUT= 1<<2,
+  PRE_EXE_EXTEND_END=1<<31
+};
 
 #define NOT_NULL_FLAG	1		/* Field can't be NULL */
 #define PRI_KEY_FLAG	2		/* Field is part of a primary key */
@@ -162,10 +179,15 @@ enum enum_server_command
 #define CLIENT_CAN_HANDLE_EXPIRED_PASSWORDS (1UL << 22)
 #define CLIENT_SESSION_TRACKING  (1UL << 23)
 
+/* Client no longer needs EOF packet */
+#define CLIENT_DEPRECATE_EOF (1UL << 24)
+
 #define CLIENT_SUPPORT_ORACLE_MODE (1UL << 27)
 #define CLIENT_RETURN_HIDDEN_ROWID (1UL << 28)
 
-#define CLIENT_PROGRESS          (1UL << 29) /* client supports progress indicator */
+#define CLIENT_USE_LOB_LOCATOR (1UL << 29)
+// #define CLIENT_PROGRESS          (1UL << 29) /* client supports progress indicator */
+#define CLIENT_PROGRESS          (1UL << 32) /* client supports progress indicator */
 #define CLIENT_PROGRESS_OBSOLETE  CLIENT_PROGRESS 
 #define CLIENT_SSL_VERIFY_SERVER_CERT (1UL << 30)
 #define CLIENT_REMEMBER_OPTIONS  (1UL << 31)
@@ -273,7 +295,7 @@ typedef struct st_ma_pvio MARIADB_PVIO;
 #define MAX_BIGINT_WIDTH     20
 
 struct st_ma_connection_plugin;
-
+struct st_ob20protocol;
 
 typedef struct st_net {
   MARIADB_PVIO *pvio;
@@ -292,7 +314,7 @@ typedef struct st_net {
   char unused_1;
   my_bool unused_2;
   my_bool compress;
-  my_bool unused_3;
+  my_bool use_ob20protocol;
   void *unused_4;
   unsigned int last_errno;
   unsigned char error;
@@ -301,6 +323,7 @@ typedef struct st_net {
   char last_error[MYSQL_ERRMSG_SIZE];
   char sqlstate[SQLSTATE_LENGTH+1];
   struct st_mariadb_net_extension *extension;
+  struct st_ob20protocol *ob20protocol;
 } NET;
 
 #define packet_error ((unsigned int) -1)
@@ -311,6 +334,9 @@ enum enum_mysql_set_option
   MYSQL_OPTION_MULTI_STATEMENTS_ON,
   MYSQL_OPTION_MULTI_STATEMENTS_OFF
 };
+
+#define CURSOR_TYPE_ARRAY_BIND 8
+#define CURSOR_TYPE_SAVE_EXCEPTION 16
 
 enum enum_session_state_type
 {
@@ -334,6 +360,70 @@ enum enum_session_state_type
    TODO: Remove this after server fixes */
 #define SESSION_TRACK_TRANSACTION_TYPE SESSION_TRACK_TRANSACTION_STATE
 
+// for obproxy and observer compatibility
+enum ObCapabilityFlagShift
+{
+  OB_CAP_PARTITION_TABLE_SHIFT = 0,
+  OB_CAP_CHANGE_USER_SHIFT,
+  OB_CAP_READ_WEAK_SHIFT,
+  OB_CAP_CHECKSUM_SHIFT,
+  OB_CAP_SAFE_WEAK_READ_SHIFT,
+  OB_CAP_PRIORITY_HIT_SHIFT,
+  OB_CAP_CHECKSUM_SWITCH_SHIFT,
+  OB_CAP_OCJ_ENABLE_EXTRA_OK_PACKET_SHIFT,
+  OB_CAP_OB_PROTOCOL_V2_SHIFT,
+  OB_CAP_EXTRA_OK_PACKET_FOR_STATISTICS_SHIFT,
+  OB_CAP_ABUNDANT_FEEDBACK,
+  OB_CAP_PL_ROUTE_SHIFT,
+  OB_CAP_PROXY_REROUTE_SHIFT,
+  OB_CAP_PROXY_SESSION_SYNC_SHIFT,
+  OB_CAP_FULL_LINK_TRACE_SHIFT,
+  OB_CAP_PROXY_NEW_EXTRA_INFO_SHIFT
+};
+
+#define OB_TEST_CAPABILITY(cap, tg_cap) (((cap) & (tg_cap)) == (tg_cap))
+#define OB_CAP_GET_TYPE(i)        (1LL << i)
+#define OB_CAP_PARTITION_TABLE    OB_CAP_GET_TYPE(OB_CAP_PARTITION_TABLE_SHIFT)
+#define OB_CAP_CHANGE_USER        OB_CAP_GET_TYPE(OB_CAP_CHANGE_USER_SHIFT)
+#define OB_CAP_READ_WEAK          OB_CAP_GET_TYPE(OB_CAP_READ_WEAK_SHIFT)
+#define OB_CAP_CHECKSUM           OB_CAP_GET_TYPE(OB_CAP_CHECKSUM_SHIFT)
+#define OB_CAP_SAFE_WEAK_READ     OB_CAP_GET_TYPE(OB_CAP_SAFE_WEAK_READ_SHIFT)
+#define OB_CAP_PRIORITY_HIT       OB_CAP_GET_TYPE(OB_CAP_PRIORITY_HIT_SHIFT)
+#define OB_CAP_CHECKSUM_SWITCH    OB_CAP_GET_TYPE(OB_CAP_CHECKSUM_SWITCH_SHIFT)
+#define OB_CAP_OB_PROTOCOL_V2     OB_CAP_GET_TYPE(OB_CAP_OB_PROTOCOL_V2_SHIFT)
+#define OB_CAP_EXTRA_OK_PACKET_FOR_STATISTICS   OB_CAP_GET_TYPE(OB_CAP_EXTRA_OK_PACKET_FOR_STATISTICS_SHIFT)
+#define OB_CAP_PL_ROUTE           OB_CAP_GET_TYPE(OB_CAP_PL_ROUTE_SHIFT)
+#define OB_CAP_PROXY_REROUTE      OB_CAP_GET_TYPE(OB_CAP_PROXY_REROUTE_SHIFT)
+#define OB_CAP_PROXY_SESSION_SYNC OB_CAP_GET_TYPE(OB_CAP_PROXY_SESSION_SYNC_SHIFT)
+#define OB_CAP_FULL_LINK_TRACE    OB_CAP_GET_TYPE(OB_CAP_FULL_LINK_TRACE_SHIFT)
+#define OB_CAP_PROXY_NEW_EXTRA_INFO OB_CAP_GET_TYPE(OB_CAP_PROXY_NEW_EXTRA_INFO_SHIFT)
+
+static const unsigned long OBPROXY_DEFAULT_CAPABILITY_FLAG =
+    (OB_CAP_PARTITION_TABLE
+     | OB_CAP_CHANGE_USER
+     | OB_CAP_READ_WEAK
+     | OB_CAP_CHECKSUM
+     | OB_CAP_SAFE_WEAK_READ
+     | OB_CAP_CHECKSUM_SWITCH
+     | OB_CAP_OB_PROTOCOL_V2
+     | OB_CAP_EXTRA_OK_PACKET_FOR_STATISTICS
+     | OB_CAP_PL_ROUTE
+     | OB_CAP_PROXY_REROUTE
+     | OB_CAP_FULL_LINK_TRACE
+     | OB_CAP_PROXY_NEW_EXTRA_INFO);
+
+static const long OB_MAX_UINT32_BUF_LEN = 11; // string length of max uint32_t(2**32 - 1)
+static const long OB_MAX_UINT64_BUF_LEN = 22; // string length of max uint64_t(2**64 - 1)
+static const long OB_MAX_VERSION_BUF_LEN = 22; // string length of (xxx.xxx.xxx.xxx.xxx)
+static const long OB_MAX_IP_BUF_LEN = 20; // string length of (xxx.xxx.xxx.xxx.xxx)
+
+static const char *const OB_MYSQL_CAPABILITY_FLAG = "__proxy_capability_flag";
+static const char *const OB_MYSQL_CLIENT_MODE = "__mysql_client_type";
+static const char *const OB_MYSQL_CLIENT_OBPROXY_MODE = "__ob_proxy";
+static const char *const OB_MYSQL_CONNECTION_ID = "__connection_id";
+static const char *const OB_MYSQL_PROXY_CONNECTION_ID = "__proxy_connection_id";
+static const char *const OB_MYSQL_GLOBAL_VARS_VERSION = "__global_vars_version";
+
 typedef enum enum_field_types { MYSQL_TYPE_DECIMAL, MYSQL_TYPE_TINY,
                         MYSQL_TYPE_SHORT,  MYSQL_TYPE_LONG,
                         MYSQL_TYPE_FLOAT,  MYSQL_TYPE_DOUBLE,
@@ -356,6 +446,7 @@ typedef enum enum_field_types { MYSQL_TYPE_DECIMAL, MYSQL_TYPE_TINY,
                         MYSQL_TYPE_ARRAY = 161, //0xa1
                         MYSQL_TYPE_STRUCT = 162, //0xa2
                         MYSQL_TYPE_CURSOR = 163, //0xa3
+                        MYSQL_TYPE_PLARRAY = 164, //0xa4
                         MYSQL_TYPE_OB_TIMESTAMP_WITH_TIME_ZONE = 200,
                         MYSQL_TYPE_OB_TIMESTAMP_WITH_LOCAL_TIME_ZONE = 201,
                         MYSQL_TYPE_OB_TIMESTAMP_NANO = 202,
@@ -464,6 +555,12 @@ typedef struct st_udf_init
   /* Constants when using compression */
 #define NET_HEADER_SIZE 4		/* standard header size */
 #define COMP_HEADER_SIZE 3		/* compression header extra size */
+#define PIECE_HEADER_SIZE 16  /* COM_STMT_SEND_PIECE_DATA header size */
+#define OB20_HEADER_SIZE 24 /* ob 20 protocol header size */
+#define OB20_TAILER_SIZE 4 /* ob 20 protocol tailer size */
+#define OB20_PROTOCOL_MAGIC_NUM 0x20AB /* ob 20 protocol header magic num */
+#define OB20_PROTOCOL_VERSION_VALUE 20 /* ob 20 protocol header version */
+#define OB20_EXTRAINFO_LENGTH_SIZE 4 /* ob 20 protocol extra_info size */
 
   /* Prototypes to password functions */
 #define native_password_plugin_name "mysql_native_password"

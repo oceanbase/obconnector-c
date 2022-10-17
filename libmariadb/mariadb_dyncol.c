@@ -3064,7 +3064,7 @@ dynamic_column_update_move_left(DYNAMIC_COLUMN *str, PLAN *plan,
   return ER_DYNCOL_OK;
 }
 
-#ifdef UNUSED
+#if 0
 static enum enum_dyncol_func_result
 dynamic_column_update_move_right(DYNAMIC_COLUMN *str, PLAN *plan,
                                  size_t offset_size,

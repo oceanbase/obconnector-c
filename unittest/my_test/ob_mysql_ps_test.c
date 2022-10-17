@@ -133,7 +133,7 @@ int do_stmt_insert(MYSQL* mysql) {
 }
 int do_stmt_select(MYSQL* mysql) {
   my_log("=========do_stmt_select==========");
-  const char* pStatement = "select * from person";
+  const char* pStatement = "select * from person where id > ?";
   MYSQL_STMT    *stmt;
   MYSQL_BIND    bind[4];
   int           param_count;
@@ -150,6 +150,24 @@ int do_stmt_select(MYSQL* mysql) {
   }
   filed_count = mysql_stmt_field_count(stmt);
   param_count = mysql_stmt_param_count(stmt);
+  ASSERT_EQ(param_count, 1, "mysql_stmt_param_count");
+  int id, num;
+  id = 0;
+  memset(bind, 0, sizeof(bind));
+  {
+    //id
+    bind[0].buffer_type = MYSQL_TYPE_LONG;
+    bind[0].buffer = (char*)&id;
+    bind[0].buffer_length = 0;
+    bind[0].is_null = 0;
+    bind[0].length = 0;
+    // bind[0].is_unsigned = 0;
+  }
+  if (mysql_stmt_bind_param(stmt, bind)) {
+    my_log("bind failed:%s", mysql_stmt_error(stmt));
+    ASSERT_EQ(0, -1, "mysql_stmt_bind_param failed");
+    return -1;
+  }
   unsigned int iteration_count = 1;
   //stmt->iteration_count = 0;
   if (mysql_stmt_execute(stmt)) {
@@ -165,7 +183,6 @@ int do_stmt_select(MYSQL* mysql) {
   my_ulonglong row_count = mysql_stmt_num_rows(stmt);
   ASSERT_EQ(row_count, 9, "mysql_stmt_field_count");
   memset(bind, 0, sizeof(bind));
-  int id, num;
   char name[20];
   char birthday[20];
   bind[0].buffer_type = MYSQL_TYPE_LONG;

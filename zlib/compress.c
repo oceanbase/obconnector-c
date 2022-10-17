@@ -7,6 +7,7 @@
 
 #define ZLIB_INTERNAL
 #include "zlib.h"
+#include "string.h"
 
 /* ===========================================================================
      Compresses the source buffer into the destination buffer. The level
@@ -33,6 +34,8 @@ int ZEXPORT compress2 (dest, destLen, source, sourceLen, level)
 
     left = *destLen;
     *destLen = 0;
+
+    memset(&stream, 0, sizeof(stream));
 
     stream.zalloc = (alloc_func)0;
     stream.zfree = (free_func)0;

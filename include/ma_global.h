@@ -1,5 +1,5 @@
 /* Copyright (C) 2000 MySQL AB & MySQL Finland AB & TCX DataKonsult AB
-   
+   Copyright (c) 2021 OceanBase.
    This library is free software; you can redistribute it and/or
    modify it under the terms of the GNU Library General Public
    License as published by the Free Software Foundation; either
@@ -25,7 +25,12 @@
 #include <winsock2.h>
 #include <windows.h>
 #include <stdlib.h>
+#ifndef strcasecmp
 #define strcasecmp _stricmp
+#endif
+#ifndef strncasecmp
+#define strncasecmp _strnicmp
+#endif
 #define sleep(x) Sleep(1000*(x))
 #ifdef _MSC_VER
 #define inline __inline
@@ -550,7 +555,7 @@ extern double		my_atof(const char*);
   Max size that must be added to a so that we know Size to make
   addressable obj.
 */
-typedef long my_ptrdiff_t;
+typedef long ma_ptrdiff_t;
 #define MY_ALIGN(A,L)	(((A) + (L) - 1) & ~((L) - 1))
 #define ALIGN_SIZE(A)	MY_ALIGN((A),sizeof(double))
 /* Size to make addressable obj. */
@@ -558,7 +563,7 @@ typedef long my_ptrdiff_t;
 			 /* Offset of filed f in structure t */
 #define OFFSET(t, f)	((size_t)(char *)&((t *)0)->f)
 #define ADD_TO_PTR(ptr,size,type) (type) ((unsigned char*) (ptr)+size)
-#define PTR_BYTE_DIFF(A,B) (my_ptrdiff_t) ((unsigned char*) (A) - (unsigned char*) (B))
+#define PTR_BYTE_DIFF(A,B) (ma_ptrdiff_t) ((unsigned char*) (A) - (unsigned char*) (B))
 
 #define NullS		(char *) 0
 /* Nowadays we do not support MessyDos */
@@ -682,8 +687,16 @@ typedef short		int15;	/* Most effective integer 0 <= x <= 32767 */
 typedef char		*my_string; /* String of characters */
 typedef unsigned long	size_s; /* Size of strings (In string-funcs) */
 typedef int		myf;	/* Type of MyFlags in my_funcs */
-typedef char		my_bool; /* Small bool */
+#ifndef TYPEDEF_MY_BOOL
+#define TYPEDEF_MY_BOOL
+typedef char            my_bool; /* Small bool */
+
+#endif
+
+#ifndef TYPEDEF_MY_ULONGLONG
+#define TYPEDEF_MY_ULONGLONG
 typedef unsigned long long my_ulonglong;
+#endif
 #if !defined(bool) && !defined(bool_defined) && (!defined(HAVE_BOOL) || !defined(__cplusplus))
 typedef char		bool;	/* Ordinary boolean values 0 1 */
 #endif
@@ -1091,4 +1104,62 @@ typedef unsigned long long intptr;
 #define RTLD_NOW 1
 #endif
 
+#ifndef OB_MACRO
+#define OB_MACRO
+
+#define OB_SUCCESS  0
+#define OB_ERROR  -4000
+#define UNUSED(x) (void)x
+
+#define OB_LIKELY(x)       __builtin_expect(!!(x),1)
+#define OB_UNLIKELY(x)     __builtin_expect(!!(x),0)
+#define OB_ISNULL(statement) (OB_UNLIKELY(NULL == (statement)))
+#define OB_NOT_NULL(statement) (OB_LIKELY(NULL != (statement)))
+
+
+#define OB_SUCC(statement) (OB_LIKELY(OB_SUCCESS == (ret = (statement))))
+#define OB_FAIL(statement) (OB_UNLIKELY(OB_SUCCESS != (ret = (statement))))
+#define OB_INLINE inline __attribute__((always_inline))
+
+#define OB_SIZE_OVERFLOW -4019
+#define OB_DESERIALIZE_ERROR -4034
+
+#define OB_MAX_V1B  (__UINT64_C(1) << 7) - 1
+#define OB_MAX_V2B  (__UINT64_C(1) << 14) - 1
+#define OB_MAX_V3B  (__UINT64_C(1) << 21) - 1
+#define OB_MAX_V4B  (__UINT64_C(1) << 28) - 1
+#define OB_MAX_V5B  (__UINT64_C(1) << 35) - 1
+#define OB_MAX_V6B  (__UINT64_C(1) << 42) - 1
+#define OB_MAX_V7B  (__UINT64_C(1) << 49) - 1
+#define OB_MAX_V8B  (__UINT64_C(1) << 56) - 1
+#define OB_MAX_V9B  (__UINT64_C(1) << 63) - 1
+
+
+#define OB_MAX_1B  (__UINT64_C(1) << 8) - 1
+#define OB_MAX_2B  (__UINT64_C(1) << 16) - 1
+#define OB_MAX_3B  (__UINT64_C(1) << 24) - 1
+#define OB_MAX_4B  (__UINT64_C(1) << 32) - 1
+#define OB_MAX_5B  (__UINT64_C(1) << 40) - 1
+#define OB_MAX_6B  (__UINT64_C(1) << 48) - 1
+#define OB_MAX_7B  (__UINT64_C(1) << 56) - 1
+#define OB_MAX_8B  UINT64_MAX;
+
+
+
+#define OB_MAX_INT_1B  (__UINT64_C(23))
+#define OB_MAX_INT_2B  (__UINT64_C(1) << 8) - 1
+#define OB_MAX_INT_3B  (__UINT64_C(1) << 16) - 1
+#define OB_MAX_INT_4B  (__UINT64_C(1) << 24) - 1
+#define OB_MAX_INT_5B  (__UINT64_C(1) << 32) - 1
+#define OB_MAX_INT_7B  (__UINT64_C(1) << 48) - 1
+#define OB_MAX_INT_9B  UINT64_MAX
+
+
+#define OB_MAX_1B_STR_LEN  (__INT64_C(55))
+#define OB_MAX_2B_STR_LEN  (__INT64_C(1) << 8) - 1
+#define OB_MAX_3B_STR_LEN  (__INT64_C(1) << 16) - 1
+#define OB_MAX_4B_STR_LEN  (__INT64_C(1) << 24) - 1
+#define OB_MAX_5B_STR_LEN  (__INT64_C(1) << 32) - 1
+
+#endif
 #endif /* _global_h */

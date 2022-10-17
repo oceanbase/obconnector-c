@@ -163,7 +163,7 @@ int do_stmt_select(MYSQL* mysql) {
   filed_count = mysql_stmt_field_count(stmt);
   ASSERT_EQ(filed_count, 4, "mysql_stmt_field_count");
   my_ulonglong row_count = mysql_stmt_num_rows(stmt);
-  ASSERT_EQ(row_count, 9, "mysql_stmt_field_count");
+  ASSERT_EQ(row_count, 9, "mysql_stmt_num_rows");
   memset(bind, 0, sizeof(bind));
   int id, num;
   char name[20];

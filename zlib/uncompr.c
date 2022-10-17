@@ -7,6 +7,7 @@
 
 #define ZLIB_INTERNAL
 #include "zlib.h"
+#include "string.h"
 
 /* ===========================================================================
      Decompresses the source buffer into the destination buffer.  *sourceLen is
@@ -35,6 +36,8 @@ int ZEXPORT uncompress2 (dest, destLen, source, sourceLen)
     const uInt max = (uInt)-1;
     uLong len, left;
     Byte buf[1];    /* for detection of incomplete stream when *destLen == 0 */
+
+    memset(&stream, 0, sizeof(stream));
 
     len = *sourceLen;
     if (*destLen) {

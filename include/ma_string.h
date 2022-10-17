@@ -1,6 +1,6 @@
 /* Copyright (C) 2000 MySQL AB & MySQL Finland AB & TCX DataKonsult AB
                  2012 by MontyProgram AB
-
+   Copyright (c) 2021 OceanBase.
    This library is free software; you can redistribute it and/or
    modify it under the terms of the GNU Library General Public
    License as published by the Free Software Foundation; either
@@ -22,7 +22,7 @@
 #define _ma_string_h_
 
 #include <string.h>
-
+#include "ma_global.h"
 typedef enum {
   MY_GCVT_ARG_FLOAT,
   MY_GCVT_ARG_DOUBLE

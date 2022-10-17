@@ -1,7 +1,7 @@
 /************************************************************************************
     Copyright (C) 2000, 2012 MySQL AB & MySQL Finland AB & TCX DataKonsult AB,
                  Monty Program AB, 2016 MariaDB Corporation AB
-   
+   Copyright (c) 2021 OceanBase.
    This library is free software; you can redistribute it and/or
    modify it under the terms of the GNU Library General Public
    License as published by the Free Software Foundation; either
@@ -38,18 +38,18 @@
 #define HIGHUSED 8
 
 static uint hash_mask(uint hashnr,uint buffmax,uint maxlength);
-static void movelink(HASH_LINK *array,uint pos,uint next_link,uint newlink);
+static void movelink(OB_HASH_LINK *array,uint pos,uint next_link,uint newlink);
 static uint calc_hashnr(const uchar *key,uint length);
 static uint calc_hashnr_caseup(const uchar *key,uint length);
-static int hashcmp(HASH *hash,HASH_LINK *pos,const uchar *key,uint length);
+static int hashcmp(OB_HASH *hash, OB_HASH_LINK *pos,const uchar *key,uint length);
 
 
-my_bool _hash_init(HASH *hash,uint size,uint key_offset,uint key_length,
+my_bool _hash_init(OB_HASH *hash,uint size,uint key_offset,uint key_length,
 		  hash_get_key get_key,
 		  void (*free_element)(void*),uint flags CALLER_INFO_PROTO)
 {
   hash->records=0;
-  if (ma_init_dynamic_array_ci(&hash->array,sizeof(HASH_LINK),size,0))
+  if (ma_init_dynamic_array_ci(&hash->array,sizeof(OB_HASH_LINK),size,0))
   {
     hash->free=0;				/* Allow call to hash_free */
     return(TRUE);
@@ -69,12 +69,12 @@ my_bool _hash_init(HASH *hash,uint size,uint key_offset,uint key_length,
 }
 
 
-void hash_free(HASH *hash)
+void hash_free(OB_HASH *hash)
 {
   if (hash->free)
   {
     uint i,records;
-    HASH_LINK *data=dynamic_element(&hash->array,0,HASH_LINK*);
+    OB_HASH_LINK *data=dynamic_element(&hash->array,0, OB_HASH_LINK*);
     for (i=0,records=hash->records ; i < records ; i++)
       (*hash->free)(data[i].data);
     hash->free=0;
@@ -92,7 +92,7 @@ void hash_free(HASH *hash)
 */
 
 static inline char*
-hash_key(HASH *hash,const uchar *record,uint *length,my_bool first)
+hash_key(OB_HASH *hash,const uchar *record,uint *length,my_bool first)
 {
   if (hash->get_key)
     return (char *)(*hash->get_key)(record,(uint *)length,first);
@@ -108,7 +108,7 @@ static uint hash_mask(uint hashnr,uint buffmax,uint maxlength)
   return (hashnr & ((buffmax >> 1) -1));
 }
 
-static uint hash_rec_mask(HASH *hash,HASH_LINK *pos,uint buffmax,
+static uint hash_rec_mask(OB_HASH *hash,OB_HASH_LINK *pos,uint buffmax,
 			  uint maxlength)
 {
   uint length;
@@ -191,7 +191,7 @@ uint calc_hashnr_caseup(const uchar *key, uint len)
 #ifndef __SUNPRO_C				/* SUNPRO can't handle this */
 static inline
 #endif
-unsigned int rec_hashnr(HASH *hash,const uchar *record)
+unsigned int rec_hashnr(OB_HASH *hash,const uchar *record)
 {
   uint length;
   uchar *key= (uchar*) hash_key(hash,record,&length,0);
@@ -202,9 +202,9 @@ unsigned int rec_hashnr(HASH *hash,const uchar *record)
 	/* Search after a record based on a key */
 	/* Sets info->current_ptr to found record */
 
-void* hash_search(HASH *hash,const uchar *key,uint length)
+void* hash_search(OB_HASH *hash,const uchar *key,uint length)
 {
-  HASH_LINK *pos;
+  OB_HASH_LINK *pos;
   uint flag,idx;
 
   flag=1;
@@ -215,7 +215,7 @@ void* hash_search(HASH *hash,const uchar *key,uint length)
 		    hash->blength,hash->records);
     do
     {
-      pos= dynamic_element(&hash->array,idx,HASH_LINK*);
+      pos= dynamic_element(&hash->array,idx,OB_HASH_LINK*);
       if (!hashcmp(hash,pos,key,length))
       {
 	hash->current_record= idx;
@@ -237,14 +237,14 @@ void* hash_search(HASH *hash,const uchar *key,uint length)
 	/* Get next record with identical key */
 	/* Can only be called if previous calls was hash_search */
 
-void *hash_next(HASH *hash,const uchar *key,uint length)
+void *hash_next(OB_HASH *hash,const uchar *key,uint length)
 {
-  HASH_LINK *pos;
+  OB_HASH_LINK *pos;
   uint idx;
 
   if (hash->current_record != NO_RECORD)
   {
-    HASH_LINK *data=dynamic_element(&hash->array,0,HASH_LINK*);
+    OB_HASH_LINK *data=dynamic_element(&hash->array,0, OB_HASH_LINK*);
     for (idx=data[hash->current_record].next; idx != NO_RECORD ; idx=pos->next)
     {
       pos=data+idx;
@@ -262,9 +262,9 @@ void *hash_next(HASH *hash,const uchar *key,uint length)
 
 	/* Change link from pos to new_link */
 
-static void movelink(HASH_LINK *array,uint find,uint next_link,uint newlink)
+static void movelink(OB_HASH_LINK *array,uint find,uint next_link,uint newlink)
 {
-  HASH_LINK *old_link;
+  OB_HASH_LINK *old_link;
   do
   {
     old_link=array+next_link;
@@ -276,7 +276,7 @@ static void movelink(HASH_LINK *array,uint find,uint next_link,uint newlink)
 
 	/* Compare a key in a record to a whole key. Return 0 if identical */
 
-static int hashcmp(HASH *hash,HASH_LINK *pos,const uchar *key,uint length)
+static int hashcmp(OB_HASH *hash, OB_HASH_LINK *pos,const uchar *key,uint length)
 {
   uint rec_keylength;
   uchar *rec_key= (uchar*) hash_key(hash,pos->data,&rec_keylength,1);
@@ -287,22 +287,22 @@ static int hashcmp(HASH *hash,HASH_LINK *pos,const uchar *key,uint length)
 
 	/* Write a hash-key to the hash-index */
 
-my_bool hash_insert(HASH *info,const uchar *record)
+my_bool hash_insert(OB_HASH *info,const uchar *record)
 {
   int flag;
   uint halfbuff,hash_nr,first_index,idx;
   uchar *ptr_to_rec= NULL,*ptr_to_rec2= NULL;
-  HASH_LINK *data,*empty,*gpos= NULL,*gpos2 = NULL,*pos;
+  OB_HASH_LINK *data,*empty,*gpos= NULL,*gpos2 = NULL,*pos;
 
   LINT_INIT(gpos); LINT_INIT(gpos2);
   LINT_INIT(ptr_to_rec); LINT_INIT(ptr_to_rec2);
 
   flag=0;
-  if (!(empty=(HASH_LINK*) ma_alloc_dynamic(&info->array)))
+  if (!(empty=(OB_HASH_LINK*) ma_alloc_dynamic(&info->array)))
     return(TRUE);				/* No more memory */
 
   info->current_record= NO_RECORD;
-  data=dynamic_element(&info->array,0,HASH_LINK*);
+  data=dynamic_element(&info->array,0, OB_HASH_LINK*);
   halfbuff= info->blength >> 1;
 
   idx=first_index=info->records-halfbuff;
@@ -421,15 +421,15 @@ my_bool hash_insert(HASH *info,const uchar *record)
 ** if there is a free-function it's called for record if found
 ******************************************************************************/
 
-my_bool hash_delete(HASH *hash,uchar *record)
+my_bool hash_delete(OB_HASH *hash,uchar *record)
 {
   uint blength,pos2,pos_hashnr,lastpos_hashnr,idx,empty_index;
-  HASH_LINK *data,*lastpos,*gpos,*pos,*pos3,*empty;
+  OB_HASH_LINK *data,*lastpos,*gpos,*pos,*pos3,*empty;
   if (!hash->records)
     return(1);
 
   blength=hash->blength;
-  data=dynamic_element(&hash->array,0,HASH_LINK*);
+  data=dynamic_element(&hash->array,0, OB_HASH_LINK*);
   /* Search after record with key */
   pos=data+ hash_mask(rec_hashnr(hash,record),blength,hash->records);
   gpos = 0;
@@ -508,12 +508,12 @@ exit:
 	  This is much more efficient than using a delete & insert.
 	  */
 
-my_bool hash_update(HASH *hash,uchar *record,uchar *old_key,uint old_key_length)
+my_bool hash_update(OB_HASH *hash,uchar *record,uchar *old_key,uint old_key_length)
 {
   uint idx,new_index,new_pos_index,blength,records,empty;
-  HASH_LINK org_link,*data,*previous,*pos;
+  OB_HASH_LINK org_link,*data,*previous,*pos;
 
-  data=dynamic_element(&hash->array,0,HASH_LINK*);
+  data=dynamic_element(&hash->array,0,OB_HASH_LINK*);
   blength=hash->blength; records=hash->records;
 
   /* Search after record with key */
@@ -572,10 +572,10 @@ my_bool hash_update(HASH *hash,uchar *record,uchar *old_key,uint old_key_length)
 }
 
 
-uchar *hash_element(HASH *hash,uint idx)
+uchar *hash_element(OB_HASH *hash,uint idx)
 {
   if (idx < hash->records)
-    return dynamic_element(&hash->array,idx,HASH_LINK*)->data;
+    return dynamic_element(&hash->array,idx,OB_HASH_LINK*)->data;
   return 0;
 }
 

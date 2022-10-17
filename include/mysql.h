@@ -36,8 +36,17 @@ extern "C" {
 
 #if !defined (_global_h) && !defined (MY_GLOBAL_INCLUDED) /* If not standard header */
 #include <sys/types.h>
-typedef char my_bool;
+
+#ifndef TYPEDEF_MY_BOOL
+#define TYPEDEF_MY_BOOL
+typedef char            my_bool; /* Small bool */
+
+#endif
+
+#ifndef TYPEDEF_MY_ULONGLONG
+#define TYPEDEF_MY_ULONGLONG
 typedef unsigned long long my_ulonglong;
+#endif
 
 #if !defined(_WIN32)
 #define STDCALL
@@ -60,6 +69,7 @@ typedef int my_socket;
 #include "mariadb_version.h"
 #include "ma_list.h"
 #include "mariadb_ctype.h"
+// #include "ma_hash.h"
 
 
 typedef struct st_ma_const_string
@@ -96,10 +106,19 @@ extern unsigned int mariadb_deinitialize_ssl;
 #define IS_PRI_KEY(n)	((n) & PRI_KEY_FLAG)
 #define IS_NOT_NULL(n)	((n) & NOT_NULL_FLAG)
 #define IS_BLOB(n)	((n) & BLOB_FLAG)
-#define IS_NUM(t)	(((t) <= MYSQL_TYPE_INT24 && (t) != MYSQL_TYPE_TIMESTAMP) || (t) == MYSQL_TYPE_YEAR || (t) == MYSQL_TYPE_NEWDECIMAL)
+#define IS_NUM(t)	(((t) <= MYSQL_TYPE_INT24 && (t) != MYSQL_TYPE_TIMESTAMP) || (t) == MYSQL_TYPE_YEAR || (t) == MYSQL_TYPE_NEWDECIMAL || (t) == MYSQL_TYPE_OB_NUMBER_FLOAT)
+#define IS_LONGDATA(t) (((t) >= MYSQL_TYPE_TINY_BLOB && (t) <= MYSQL_TYPE_STRING) || ((t) == MYSQL_TYPE_OB_NVARCHAR2 || (t) == MYSQL_TYPE_OB_NCHAR))
 #define IS_NUM_FIELD(f)	 ((f)->flags & NUM_FLAG)
 #define INTERNAL_NUM_FIELD(f) (((f)->type <= MYSQL_TYPE_INT24 && ((f)->type != MYSQL_TYPE_TIMESTAMP || (f)->length == 14 || (f)->length == 8)) || (f)->type == MYSQL_TYPE_YEAR || (f)->type == MYSQL_TYPE_NEWDECIMAL || (f)->type == MYSQL_TYPE_DECIMAL)
 
+#define IS_NUM_TERMINAL(t)      (((t) <= MYSQL_TYPE_INT24 && (t) != MYSQL_TYPE_TIMESTAMP) || (t) == MYSQL_TYPE_YEAR || (t) == MYSQL_TYPE_NEWDECIMAL || (t) == MYSQL_TYPE_OB_NUMBER_FLOAT)
+#define IS_NUM_BINARY_TERMINAL(t) ((t) == MYSQL_TYPE_FLOAT || (t) == MYSQL_TYPE_DOUBLE)
+enum ObRoutineParamInOut
+{
+  SP_PARAM_IN = 1,
+  SP_PARAM_OUT = 2,
+  SP_PARAM_INOUT = 3,
+};
   typedef struct st_mysql_field {
     char *name;			/* Name of column */
     char *org_name;		/* Name of original column (added after 3.23.58) */
@@ -121,8 +140,22 @@ extern unsigned int mariadb_deinitialize_ssl;
   /***********************/
     unsigned int flags;		/* Div flags */
     unsigned int decimals;	/* Number of decimals in field */
+    unsigned int precision;
+    enum ObRoutineParamInOut ob_routine_param_inout;
+    my_bool is_implicit_rowid;
     unsigned int charsetnr;       /* char set number (added in 4.1) */
+    unsigned char *owner_name;
+    unsigned char *type_name;
+    unsigned long version;
+    unsigned int owner_name_length;
+    unsigned int type_name_length;
     enum enum_field_types type;	/* Type of field. Se mysql_com.h for types */
+    unsigned char *elem_owner_name;
+    unsigned char *elem_type_name;
+    unsigned long elem_version;
+    unsigned int elem_owner_name_length;
+    unsigned int elem_type_name_length;
+    enum enum_field_types elem_type;	/* Type of array elem. Se mysql_com.h for types */
     void *extension;              /* added in 4.1 */
   } MYSQL_FIELD;
 
@@ -369,7 +402,47 @@ struct st_mysql_options {
     my_bool       *unbuffered_fetch_owner;
     char          *info_buffer;
     struct st_mariadb_extension *extension;
+    void * ob_extension;
+    my_bool       can_use_prepare_execute;
+    my_bool       can_send_plarray_maxrarr_len;
+    my_bool       can_plarray_bindbyname;
+    my_bool       can_use_protocol_ob20;
+    my_bool       can_use_full_link_trace;
+    unsigned long ob_server_version;
+    unsigned long ob_proxy_version;
+    unsigned long capability; // system varaiable
 } MYSQL;
+struct st_mysql_trace_info;
+struct ob_st_hash;
+#ifndef TYPE_DEFINE_OB_HASH
+#define TYPE_DEFINE_OB_HASH
+typedef struct ob_st_hash OB_HASH;
+#endif
+typedef struct st_mysql_extension {
+  MYSQL *mysql;
+  OB_HASH *complex_type_hash;
+#define MAX_NLS_FORMAT_STR_LEN 256
+  unsigned char nls_date_format[MAX_NLS_FORMAT_STR_LEN];
+  unsigned char nls_timestamp_format[MAX_NLS_FORMAT_STR_LEN];
+  unsigned char nls_timestamp_tz_format[MAX_NLS_FORMAT_STR_LEN];
+  // struct st_mysql_trace_info *trace_data;
+  // struct st_session_track_info state_change;
+} MYSQL_EXTENSION;
+/* "Constructor/destructor" for MYSQL extension structure. */
+struct st_mysql_extension* mysql_extension_init(struct st_mysql*);
+void mysql_extension_free(struct st_mysql_extension*);
+
+/*
+  Note: Allocated extension structure is freed in mysql_close_free()
+  called by mysql_close().
+*/
+#define MYSQL_EXTENSION_PTR(H)                                    \
+(                                                                 \
+ (struct st_mysql_extension*)                                     \
+ ( (H)->ob_extension ?                                               \
+   (H)->ob_extension : ((H)->ob_extension= mysql_extension_init(H)) \
+ )                                                                \
+)
 
 typedef struct st_mysql_res {
   unsigned long long  row_count;
@@ -384,6 +457,8 @@ typedef struct st_mysql_res {
   MYSQL		*handle;		/* for unbuffered reads */
   my_bool	eof;			/* Used my mysql_fetch_row */
   my_bool       is_ps;
+  MYSQL_FIELD *param_fields;
+  unsigned int param_count;
 } MYSQL_RES;
 
 typedef struct
@@ -512,6 +587,7 @@ my_bool STDCALL mysql_eof(MYSQL_RES *res);
 MYSQL_FIELD *STDCALL mysql_fetch_field_direct(MYSQL_RES *res,
 					      unsigned int fieldnr);
 MYSQL_FIELD * STDCALL mysql_fetch_fields(MYSQL_RES *res);
+MYSQL_FIELD * STDCALL mysql_fetch_params(MYSQL_RES *res);
 MYSQL_ROWS * STDCALL mysql_row_tell(MYSQL_RES *res);
 unsigned int STDCALL mysql_field_tell(MYSQL_RES *res);
 
@@ -742,6 +818,7 @@ int STDCALL mysql_stmt_send_long_data_start(my_bool *ret, MYSQL_STMT *stmt,
 int STDCALL mysql_stmt_send_long_data_cont(my_bool *ret, MYSQL_STMT *stmt,
                                            int status);
 int STDCALL mysql_reset_connection(MYSQL *mysql);
+my_bool get_local_ip_port(my_socket fd, char *ip, int iplen, int *port);
 
 /* API function calls (used by dynamic plugins) */
 struct st_mariadb_api {

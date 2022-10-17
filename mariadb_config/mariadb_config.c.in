@@ -28,7 +28,7 @@ static char *mariadb_progname;
 #endif
 
 #define INCLUDE "-I%s/@INSTALL_INCLUDEDIR@ -I%s/@INSTALL_INCLUDEDIR@/mysql"
-#define LIBS    "-L%s/@INSTALL_LIBDIR@/ -lmariadb"
+#define LIBS    "-L%s/@INSTALL_LIBDIR@/ -lobclnt"
 #define LIBS_SYS "@extra_dynamic_LDFLAGS@"
 #define CFLAGS  INCLUDE
 #define VERSION "@MARIADB_CLIENT_VERSION@"

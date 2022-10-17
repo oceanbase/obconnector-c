@@ -257,6 +257,10 @@ static int send_client_reply_packet(MCPVIO_EXT *mpvio,
   mysql->client_flag&= ~CLIENT_COMPRESS;
 #endif
 
+  if (FALSE == mysql->can_use_protocol_ob20) {
+    mysql->client_flag&= ~CLIENT_COMPRESS;
+  }
+
   if (mysql->client_flag & CLIENT_PROTOCOL_41)
   {
     /* 4.1 server and 4.1 client has a 32 byte option flag */

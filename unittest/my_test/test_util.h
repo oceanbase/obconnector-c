@@ -3,12 +3,11 @@
 #include <string.h>
 #include <time.h>
 #include <stdarg.h>
-//obclient -h 11.158.31.35 -usys@oracle -P27701
-const char* DBHOST = "11.158.31.35";
-const char* DBUSER = "sys@oracle";
+const char* DBHOST = "";
+const char* DBUSER = "";
 const char* DBPASS = "";
-unsigned int   DBPORT = 27701;
-const char* DBNAME = "sys";
+unsigned int   DBPORT = 0;
+const char* DBNAME = "";
 const char* DBSOCK = NULL; //"/var/lib/mysql/mysql.sock"
 const unsigned long   DBPCNT = 0;
 #ifdef __cplusplus

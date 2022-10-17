@@ -26,4 +26,8 @@ cmake . \
 -DDEFAULT_COLLATION=utf8_general_ci \
 -DWITHOUT_TOKUDB=1
 
+#-DCMAKE_BUILD_TYPE=DEBUG \
+#-DCMAKE_C_FLAGS_DEBUG="-g -O0" \
+#-DCMAKE_CXX_FLAGS_DEBUG="-g -O0" \
+
 make -j `cat /proc/cpuinfo | grep processor| wc -l`
