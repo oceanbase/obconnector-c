@@ -27,8 +27,8 @@
 #include "ma_global.h"
 
 
-inline int encode_i64(char *buf, const int64_t buf_len, int64_t *ppos, int64_t val);
-inline int decode_i64(const char *buf, const int64_t data_len, int64_t *ppos, int64_t *val);
+int encode_i64(char *buf, const int64_t buf_len, int64_t *ppos, int64_t val);
+int decode_i64(const char *buf, const int64_t data_len, int64_t *ppos, int64_t *val);
 
 inline int64_t encoded_length_vi64(int64_t val);
 

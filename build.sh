@@ -5,29 +5,13 @@ function clean()
 }
 clean
 
+TOP_DIR=$(cd "$(dirname "$0")";pwd)
+DEP_DIR=${TOP_DIR}/deps/3rd/usr/local/oceanbase/deps/devel
+
 cmake . \
 -DCMAKE_INSTALL_PREFIX=/app/mariadb \
--DMYSQL_DATADIR=/data/mariadb \
--DSYSCONFDIR=/etc \
--DMYSQL_USER=mysql \
--DWITH_INNOBASE_STORAGE_ENGINE=1 \
--DWITH_ARCHIVE_STORAGE_ENGINE=1 \
--DWITH_BLACKHOLE_STORAGE_ENGINE=1 \
--DWITH_PARTITION_STORAGE_ENGINE=1 \
--DWITHOUT_MROONGA_STORAGE_ENGINE=1 \
--DWITH_DEBUG=0 \
--DWITH_READLINE=1 \
--DWITH_SSL=system \
--DWITH_ZLIB=system \
--DWITH_LIBWRAP=0 \
+-DWITH_SSL=$DEP_DIR \
 -DENABLED_LOCAL_INFILE=1 \
--DMYSQL_UNIX_ADDR=/app/mariadb/mysql.sock \
--DDEFAULT_CHARSET=utf8 \
--DDEFAULT_COLLATION=utf8_general_ci \
--DWITHOUT_TOKUDB=1
-
-#-DCMAKE_BUILD_TYPE=DEBUG \
-#-DCMAKE_C_FLAGS_DEBUG="-g -O0" \
-#-DCMAKE_CXX_FLAGS_DEBUG="-g -O0" \
+-DDEFAULT_CHARSET=utf8
 
 make -j `cat /proc/cpuinfo | grep processor| wc -l`

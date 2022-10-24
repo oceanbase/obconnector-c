@@ -189,7 +189,7 @@ inline int decode_i8(const char *buf, const int64_t data_len, int64_t *ppos, int
   return ret;
 }
 
-inline int encode_i64(char *buf, const int64_t buf_len, int64_t *ppos, int64_t val)
+int encode_i64(char *buf, const int64_t buf_len, int64_t *ppos, int64_t val)
 {
   int pos = *ppos;
   int ret = ((NULL != buf) &&
@@ -209,7 +209,7 @@ inline int encode_i64(char *buf, const int64_t buf_len, int64_t *ppos, int64_t v
   return ret;
 }
 
-inline int decode_i64(const char *buf, const int64_t data_len, int64_t *ppos, int64_t *val)
+int decode_i64(const char *buf, const int64_t data_len, int64_t *ppos, int64_t *val)
 {
   int pos = *ppos;
   int ret = (NULL != buf && data_len - pos  >= 8) ? OB_SUCCESS : OB_ERROR;

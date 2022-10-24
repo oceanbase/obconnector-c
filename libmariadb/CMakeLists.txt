@@ -382,7 +382,7 @@ ob_complex.c
 ob_strtoll10.c
 ob_oracle_format_models.c
 ob_thread.c
-ob_object.c
+#ob_object.c
 ob_full_link_trace.c
 ob_serialize.c
 ob_rwlock.c
