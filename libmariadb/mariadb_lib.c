@@ -2130,27 +2130,28 @@ static unsigned long mysql_get_version_tool(const char* version_str)
 }
 static int get_ob_server_version(MYSQL *con)
 {
-  /* Only one thread calls this, so no synchronization is needed */
-  MYSQL_RES *result;
-
-  /* "limit 1" is protection against SQL_SELECT_LIMIT=0 */
-  char const *sql = con->oracle_mode ? "select @@version_comment, @@version from dual where rownum <= 1" : "select @@version_comment, @@version limit 1";
-  if (!mysql_query(con, sql) &&
-      (result = mysql_use_result(con)))
-  {
-    MYSQL_ROW cur = mysql_fetch_row(result);
-    if (cur && cur[0] && cur[1])
+  if (con->ob_server_version != PROXY_MODE) {
+    /* Only one thread calls this, so no synchronization is needed */
+    MYSQL_RES *result;
+    /* "limit 1" is protection against SQL_SELECT_LIMIT=0 */
+    char const *sql = con->oracle_mode ? "select @@version_comment, @@version from dual where rownum <= 1" : "select @@version_comment, @@version limit 1";
+    if (!mysql_query(con, sql) &&
+        (result = mysql_use_result(con)))
     {
-      // only get ob server version
-      if (strlen(cur[0]) > 9 && strncasecmp(cur[0], "OceanBase", 9) == 0)
+      MYSQL_ROW cur = mysql_fetch_row(result);
+      if (cur && cur[0] && cur[1])
       {
-        con->ob_server_version = mysql_get_version_tool(cur[1]);
+        // only get ob server version
+        if (strlen(cur[0]) > 9 && strncasecmp(cur[0], "OceanBase", 9) == 0)
+        {
+          con->ob_server_version = mysql_get_version_tool(cur[1]);
+        }
       }
+      mysql_free_result(result);
+    } else {
+      // error
+      return 1;
     }
-    mysql_free_result(result);
-  } else {
-    // error
-    return 1;
   }
   return 0;
 }

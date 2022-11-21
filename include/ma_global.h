@@ -1104,6 +1104,10 @@ typedef unsigned long long intptr;
 #define RTLD_NOW 1
 #endif
 
+#ifndef PROXY_MODE
+#define PROXY_MODE 0xfe
+#endif
+
 #ifndef OB_MACRO
 #define OB_MACRO
 

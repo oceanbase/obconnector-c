@@ -313,6 +313,21 @@ static int ma_net_write_buff(NET *net,const char *packet, size_t len)
     left_length=(size_t) (net->buff_end - net->write_pos);
   }
 
+  if (net->use_ob20protocol && len > left_length && net->buf_length < net->max_packet_size - 1) {
+    size_t write_len = net->write_pos - net->buff;
+    size_t resize_len = len + write_len;
+
+    if (resize_len >= net->max_packet_size) {
+      resize_len = net->max_packet_size - 1;
+    }
+    if (net_realloc(net, resize_len))
+    {
+      return 1;
+    }
+    net->write_pos += write_len;
+    left_length=(size_t) (net->buff_end - net->write_pos);
+  }
+
   if (len > left_length)
   {
     if (net->write_pos != net->buff)
@@ -471,8 +486,8 @@ int ma_net_real_write(NET *net, const char *packet, size_t len)
       net->last_errno= ER_NET_ERROR_ON_WRITE;
       net->reading_or_writing=0;
 #ifdef HAVE_COMPRESS
-      if (net->compress)
-        free((char*) packet);
+      if (net->compress && !net->use_ob20protocol)
+        free((char*) packet);       // 2.0协议buffer自管理
 #endif
       return(1);
     }

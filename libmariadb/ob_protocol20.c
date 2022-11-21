@@ -496,7 +496,8 @@ int decode_protocol20_header(Ob20Protocol *ob20protocol, uchar *buffer, uint32_t
     ret = 1;        // error
   } else {
       //check request id and pkt_seq
-    if (pkt_seq != ob20protocol->header.pkt_seq + 1) {
+    ob20protocol->header.pkt_seq++;
+    if (pkt_seq != ob20protocol->header.pkt_seq) {
       // printf("pkt_seq check error, local is %u, header is %u\n", ob20protocol->header.pkt_seq, pkt_seq);
       ret = 1;        // error   
     } else {
