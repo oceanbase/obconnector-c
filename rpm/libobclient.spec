@@ -1,6 +1,6 @@
 Name: %NAME
 Version: %VERSION
-Release: %(echo %RELEASE)
+Release: %(echo %RELEASE)%{?dist}
 License: LGPL
 Group: applications/database
 buildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root
