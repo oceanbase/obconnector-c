@@ -101,7 +101,7 @@ inline void flt_set_send_trans_flag(FLTInfo *flt, my_bool flag)
 static inline int64_t get_current_time_us()
 {
   struct timeval tv;
-  // todo: 这里要对windows做兼容
+  // todo: Here to be compatible with windows
   gettimeofday(&tv, NULL);
   return tv.tv_sec * 1000000 + tv.tv_usec;
 }
@@ -109,7 +109,7 @@ static inline int64_t get_current_time_us()
 static inline double flt_get_pct(uint64_t *seed)
 {
   uint64_t rand64;
-  /* 使用uuid中生成随机数的方法得到随机数 */
+  /* Use the method of generating random numbers in uuid to get random numbers */
   rand64 = xorshift128plus(seed);
 
   return (double)rand64 / UINT64_MAX;
@@ -139,7 +139,7 @@ int flt_init(FLTInfo *flt)
     flt->control_info_.type_ = FLT_CONTROL_INFO;
     flt->in_trans_ = FALSE;
 
-    // 初始化control info, 这时候为非法值，不会build request
+    // init control info
     flt->control_info_.level_ = -1;
     flt->control_info_.sample_pct_ = -1;
     flt->control_info_.rp_ = MAX_RECORD_POLICY;
@@ -195,7 +195,7 @@ int flt_build_request(MYSQL *mysql, FLTInfo *flt)
 
     if (TRUE == trace->trace_enable_ && NULL != span) {
       INIT_SPAN(trace, span);
-      // trace enable 为true的情况下需要发span info
+      // When trace enable is true, span info needs to be sent
       if (OB_FAIL(serialize_UUID(flt->trace_id_, UUID4_SERIALIZE_LEN, &tmp_trace_id_pos, &trace->trace_id_))) {
         // error
       } else if (OB_FAIL(serialize_UUID(flt->span_id_, UUID4_SERIALIZE_LEN, &tmp_span_id_pos, &span->span_id_))) {
@@ -241,7 +241,6 @@ int flt_build_request(MYSQL *mysql, FLTInfo *flt)
 
       if (OB_SUCC(ret) && 0 != serialize_size) {
         if (MAX_FLT_SERIALIZE_SIZE < serialize_size) {
-          // MAX_FLT_SERIALIZE_SIZE 大小不够
           ret = OB_ERROR;
         } else {
           int64_t pos = 0;
@@ -545,7 +544,7 @@ int flt_deserialize_field_appinfo(FullLinkTraceExtraInfoId extra_id, const int64
       break;
     }
     default: {
-      // 这里碰到不能识别的key直接跳过
+      // get an unrecognized key here, skip it directly
       *pos += *pos + v_len;
       break;
     }
@@ -607,7 +606,6 @@ int flt_deserialize_field_queryinfo(FullLinkTraceExtraInfoId extra_id, const int
       if (OB_FAIL(flt_get_int8(buf, len, pos, v_len, &query_info->query_start_timestamp_))) {
         ret = OB_ERROR;
       } else {
-        // printf("get start timestamp is %ld\n", query_info->query_start_timestamp_);
         // do nothing
       }
       break;
@@ -616,13 +614,12 @@ int flt_deserialize_field_queryinfo(FullLinkTraceExtraInfoId extra_id, const int
       if (OB_FAIL(flt_get_int8(buf, len, pos, v_len, &query_info->query_end_timestamp_))) {
         ret = OB_ERROR;
       } else {
-        // printf("get end timestamp is %ld\n", query_info->query_end_timestamp_);
         // do nothing
       }
       break;
     }
     default: {
-      // 这里碰到不能识别的key直接跳过
+      // get an unrecognized key here, skip it directly
       *pos += *pos + v_len;
       break;
     }
@@ -639,7 +636,7 @@ int flt_get_serialize_size_spaninfo(int32_t *size, void *flt_info)
   FLTSpanInfo *span_info = (FLTSpanInfo *)flt_info;
   // FLTSpanInfo *span_info = (FLTSpanInfo *)flt_info;
 
-  // 如果开启trace, 才需要发其他字段
+  // If trace is enabled, other fields need to be sent
   if (TRUE == span_info->trace_enable_) {
     local_size += TYPE_LENGTH + LEN_LENGTH;
     local_size += flt_get_store_int1_size();
@@ -740,7 +737,6 @@ int flt_deserialize_field_spaninfo(FullLinkTraceExtraInfoId extra_id, const int6
       break;
     }
     default: {
-      // 这里碰到不能识别的key直接跳过
       *pos += *pos + v_len;
       break;
     }
@@ -807,7 +803,6 @@ int flt_deserialize_field_driverspaninfo(FullLinkTraceExtraInfoId extra_id, cons
       break;
     }
     default: {
-       // 这里碰到不能识别的key直接跳过
       *pos += *pos + v_len;
       break;
     }
@@ -1285,8 +1280,8 @@ int trace_init(FLTInfo *flt)
     } else {
       memset(trace, 0, sizeof(*trace));
       trace->buffer_size_ = OBTRACE_DEFAULT_BUFFER_SIZE - sizeof(*trace);
-      trace->log_buf_ = trace->data_;       // 大小为MAX_TRACE_LOG_SIZE
-      trace->flt_serialize_buf_ = trace->data_ + MAX_TRACE_LOG_SIZE; // 大小为MAX_FLT_SERIALIZE_SIZE
+      trace->log_buf_ = trace->data_;       // size is MAX_TRACE_LOG_SIZE
+      trace->flt_serialize_buf_ = trace->data_ + MAX_TRACE_LOG_SIZE; // size is MAX_FLT_SERIALIZE_SIZE
       trace->offset_ = INIT_OFFSET;
       trace->auto_flush_ = 1;
       trace->trace_enable_ = FALSE;
@@ -1344,12 +1339,11 @@ void begin_trace(ObTrace *trace)
     if (TRUE == trace->trace_enable_) {
       trace->trace_id_ = uuid4_generate(trace->uuid_random_seed);
       trace->level_ = flt->control_info_.level_;
-      // 如果trace命中，后续计算打印策略
+      // If the trace hits, the subsequent calculation and printing strategy
       if (RP_ALL == flt->control_info_.rp_) {
-        // 所有命中trace的都打印
         trace->force_print_ = TRUE;
       } else if (RP_SAMPLE_AND_SLOW_QUERY == flt->control_info_.rp_) {
-        // 命中打印采样的需要打印
+        // Hit print samples need to print
         double print_pct = flt_get_pct(trace->uuid_random_seed);
         if (print_pct <= flt->control_info_.print_sample_pct_) {
           trace->force_print_ = TRUE;
@@ -1357,14 +1351,12 @@ void begin_trace(ObTrace *trace)
           trace->force_print_ = FALSE;
         }
       } else if (RP_ONLY_SLOW_QUERY == flt->control_info_.rp_) {
-        // 中打印slow query 
         trace->force_print_ = FALSE;
       } else {
-        // 其他策略，当前不打印
         trace->force_print_ = FALSE;
       }
     } else {
-      // 设置trace level为0，后续span都不会处理
+      // Set the trace level to 0, subsequent spans will not be processed
       trace->level_ = 0;
       trace->force_print_ = FALSE;
       trace->trace_id_.low_ = 0;
@@ -1588,7 +1580,7 @@ void end_span(ObTrace *trace, ObSpanCtx *span)
 #ifdef DEBUG_OB20
     printf("//////////////////////call end_span ////////////////////////////////\n");
 #endif
-  if (OB_ISNULL(trace) || OB_ISNULL(trace->flt)) {
+  if (OB_ISNULL(trace) || OB_ISNULL(trace->flt) || OB_ISNULL(span)) {
     // error
   } else if ((trace->trace_id_.low_ == 0 && trace->trace_id_.high_ == 0) 
       || (span->span_id_.low_ == 0 && span->span_id_.high_ == 0)) {
@@ -1602,11 +1594,11 @@ void end_span(ObTrace *trace, ObSpanCtx *span)
     span->end_ts_ = get_current_time_us();
     use_time = span->end_ts_ - span->start_ts_;
     trace->last_active_span_ = span->source_span_;
-    // 当前驱动只有一个span，所以直接计算这个span的结束时间然后算慢查询
-    // todo: 检查span的type，只有交互的span需要记录慢查询
+    // The current driver has only one span, so directly calculate the end time of this span and then calculate the slow query
+    // todo: Check the type of the span, only interactive spans need to record slow queries
     if (RP_ONLY_SLOW_QUERY == rp || RP_SAMPLE_AND_SLOW_QUERY == rp) {
       if (slow_query_threshold != -1 && slow_query_threshold <= use_time) {
-        // 发现慢查询，只需要开启log打印，将这个span的log发送到server打印就行
+        // If you find slow queries, you only need to enable log printing, and send the span log to the server for printing.
 #ifdef DEBUG_OB20
           printf("get slow query, use_time is %ld, slow_query_threshold is %ld\n", use_time, slow_query_threshold);
 #endif

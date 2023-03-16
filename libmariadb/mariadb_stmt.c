@@ -4670,7 +4670,7 @@ my_bool determine_protocol_ob20(MYSQL *mysql)
 my_bool get_use_protocol_ob20(MYSQL *mysql)
 {
   my_bool bret = FALSE;
-  if (mysql && (mysql->capability & OB_CAP_OB_PROTOCOL_V2)) {
+  if (mysql && (mysql->capability & OBCLIENT_CAP_OB_PROTOCOL_V2)) {
     bret = TRUE;
   }
   return bret;
@@ -4707,9 +4707,9 @@ my_bool determine_full_link_trace(MYSQL *mysql)
 my_bool get_use_full_link_trace(MYSQL *mysql)
 {
   my_bool bret = FALSE;
-  if (mysql && (mysql->capability & OB_CAP_FULL_LINK_TRACE)) {
+  if (mysql && (mysql->capability & OBCLIENT_CAP_FULL_LINK_TRACE)) {
     bret = TRUE;
-    if (mysql->capability & OB_CAP_PROXY_NEW_EXTRA_INFO) {
+    if (mysql->capability & OBCLIENT_CAP_PROXY_NEW_EXTRA_INFO) {
       // do nothing, bret = TRUE;
     } else {
       bret = FALSE;

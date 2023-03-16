@@ -30,7 +30,7 @@
 int encode_i64(char *buf, const int64_t buf_len, int64_t *ppos, int64_t val);
 int decode_i64(const char *buf, const int64_t data_len, int64_t *ppos, int64_t *val);
 
-inline int64_t encoded_length_vi64(int64_t val);
+int64_t encoded_length_vi64(int64_t val);
 
 /**
  * @brief Encode a integer (up to 64bit) in variable length encoding
@@ -41,11 +41,11 @@ inline int64_t encoded_length_vi64(int64_t val);
  *
  * @return true - success, false - failed
  */
-inline int encode_vi64(char *buf, const int64_t buf_len, int64_t *ppos, int64_t val);
+int encode_vi64(char *buf, const int64_t buf_len, int64_t *ppos, int64_t val);
 
-inline int decode_vi64(const char *buf, const int64_t data_len, int64_t *ppos, int64_t *val);
+int decode_vi64(const char *buf, const int64_t data_len, int64_t *ppos, int64_t *val);
 
-inline int64_t encoded_length_vi32(int32_t val);
+int64_t encoded_length_vi32(int32_t val);
 
 /**
  * @brief Encode a integer (up to 32bit) in variable length encoding
@@ -57,47 +57,47 @@ inline int64_t encoded_length_vi32(int32_t val);
  * @return true - success, false - failed
  */
 
-inline int encode_vi32(char *buf, const int64_t buf_len, int64_t *ppos, int32_t val);
+int encode_vi32(char *buf, const int64_t buf_len, int64_t *ppos, int32_t val);
 
-inline int decode_vi32(const char *buf, const int64_t data_len, int64_t *ppos, int32_t *val);
+int decode_vi32(const char *buf, const int64_t data_len, int64_t *ppos, int32_t *val);
 
-inline int encode_i8(char *buf, const int64_t buf_len, int64_t *ppos, int8_t val);
+int encode_i8(char *buf, const int64_t buf_len, int64_t *ppos, int8_t val);
 
-inline int decode_i8(const char *buf, const int64_t data_len, int64_t *ppos, int8_t *val);
+int decode_i8(const char *buf, const int64_t data_len, int64_t *ppos, int8_t *val);
 
-inline int encode_int64_t(char *buf, const int64_t buf_len, int64_t *pos, int64_t val);
-inline int encode_uint64_t(char *buf, const int64_t buf_len, int64_t *pos, uint64_t val);
-inline int encode_int32_t(char *buf, const int64_t buf_len, int64_t *pos, int32_t val);
-inline int encode_uint32_t(char *buf, const int64_t buf_len, int64_t *pos, uint32_t val);
-inline int encode_int16_t(char *buf, const int64_t buf_len, int64_t *pos, int16_t val);
-inline int encode_uint16_t(char *buf, const int64_t buf_len, int64_t *pos, uint16_t val);
-inline int encode_int8_t(char *buf, const int64_t buf_len, int64_t *pos, int8_t val);
-inline int encode_uint8_t(char *buf, const int64_t buf_len, int64_t *pos, uint8_t val);
+int encode_int64_t(char *buf, const int64_t buf_len, int64_t *pos, int64_t val);
+int encode_uint64_t(char *buf, const int64_t buf_len, int64_t *pos, uint64_t val);
+int encode_int32_t(char *buf, const int64_t buf_len, int64_t *pos, int32_t val);
+int encode_uint32_t(char *buf, const int64_t buf_len, int64_t *pos, uint32_t val);
+int encode_int16_t(char *buf, const int64_t buf_len, int64_t *pos, int16_t val);
+int encode_uint16_t(char *buf, const int64_t buf_len, int64_t *pos, uint16_t val);
+int encode_int8_t(char *buf, const int64_t buf_len, int64_t *pos, int8_t val);
+int encode_uint8_t(char *buf, const int64_t buf_len, int64_t *pos, uint8_t val);
 
-inline int decode_int8_t(const char *buf, const int64_t data_len, int64_t *pos, int8_t *val);
-inline int decode_uint8_t(const char *buf, const int64_t data_len, int64_t *pos, uint8_t *val);
-inline int decode_int16_t(const char *buf, const int64_t data_len, int64_t *pos, int16_t *val);
-inline int decode_uint16_t(const char *buf, const int64_t data_len, int64_t *pos, uint16_t *val);
-inline int decode_int32_t(const char *buf, const int64_t data_len, int64_t *pos, int32_t *val);
-inline int decode_uint32_t(const char *buf, const int64_t data_len, int64_t *pos, uint32_t *val);
-inline int decode_int64_t(const char *buf, const int64_t data_len, int64_t *pos, int64_t *val);
-inline int decode_uint64_t(const char *buf, const int64_t data_len, int64_t *pos, uint64_t *val);
+int decode_int8_t(const char *buf, const int64_t data_len, int64_t *pos, int8_t *val);
+int decode_uint8_t(const char *buf, const int64_t data_len, int64_t *pos, uint8_t *val);
+int decode_int16_t(const char *buf, const int64_t data_len, int64_t *pos, int16_t *val);
+int decode_uint16_t(const char *buf, const int64_t data_len, int64_t *pos, uint16_t *val);
+int decode_int32_t(const char *buf, const int64_t data_len, int64_t *pos, int32_t *val);
+int decode_uint32_t(const char *buf, const int64_t data_len, int64_t *pos, uint32_t *val);
+int decode_int64_t(const char *buf, const int64_t data_len, int64_t *pos, int64_t *val);
+int decode_uint64_t(const char *buf, const int64_t data_len, int64_t *pos, uint64_t *val);
 
-inline int64_t encoded_length_int64_t(int64_t val);
-inline int64_t encoded_length_uint64_t(uint64_t val);
-inline int64_t encoded_length_int32_t(int32_t val);
-inline int64_t encoded_length_uint32_t(uint32_t val);
-inline int64_t encoded_length_int16_t(int16_t val);
-inline int64_t encoded_length_uint16_t(uint16_t val);
-inline int64_t encoded_length_int8_t(int8_t unused);
-inline int64_t encoded_length_uint8_t(uint8_t unused);
+int64_t encoded_length_int64_t(int64_t val);
+int64_t encoded_length_uint64_t(uint64_t val);
+int64_t encoded_length_int32_t(int32_t val);
+int64_t encoded_length_uint32_t(uint32_t val);
+int64_t encoded_length_int16_t(int16_t val);
+int64_t encoded_length_uint16_t(uint16_t val);
+int64_t encoded_length_int8_t(int8_t unused);
+int64_t encoded_length_uint8_t(uint8_t unused);
 
-inline int64_t encoded_length_float(float val);
-inline int encode_float(char *buf, const int64_t buf_len, int64_t *pos, float val);
-inline int decode_float(const char *buf, const int64_t data_len, int64_t *pos, float *val);
-inline int64_t encoded_length_double(double val);
-inline int encode_double(char *buf, const int64_t buf_len, int64_t *pos, double val);
-inline int decode_double(const char *buf, const int64_t data_len, int64_t *pos, double *val);
+int64_t encoded_length_float(float val);
+int encode_float(char *buf, const int64_t buf_len, int64_t *pos, float val);
+int decode_float(const char *buf, const int64_t data_len, int64_t *pos, float *val);
+int64_t encoded_length_double(double val);
+int encode_double(char *buf, const int64_t buf_len, int64_t *pos, double val);
+int decode_double(const char *buf, const int64_t data_len, int64_t *pos, double *val);
 
 /**
  * @brief Computes the encoded length of vstr(int64,data,null)
@@ -106,15 +106,15 @@ inline int decode_double(const char *buf, const int64_t data_len, int64_t *pos, 
  *
  * @return the encoded length of str
  */
-inline int64_t encoded_length_vstr_with_len(int64_t len);
-inline int64_t encoded_length_vstr(const char *str);
+int64_t encoded_length_vstr_with_len(int64_t len);
+int64_t encoded_length_vstr(const char *str);
 
 /**
  * @brief get the decoded length of data len of vstr
  * won't change the pos
  * @return the length of data
  */
-inline int64_t decoded_length_vstr(const char *buf, const int64_t data_len, int64_t pos);
+int64_t decoded_length_vstr(const char *buf, const int64_t data_len, int64_t pos);
 
 /**
  * @brief Encode a buf as vstr(int64,data,null)
@@ -123,10 +123,10 @@ inline int64_t decoded_length_vstr(const char *buf, const int64_t data_len, int6
  * @param vbuf pointer to the start of the input buffer
  * @param len length of the input buffer
  */
-inline int encode_vstr_with_len(char *buf, const int64_t buf_len, int64_t *ppos, const void *vbuf,
+int encode_vstr_with_len(char *buf, const int64_t buf_len, int64_t *ppos, const void *vbuf,
                        int64_t len);
 
-inline int encode_vstr(char *buf, const int64_t buf_len, int64_t *ppos, const char *s);
+int encode_vstr(char *buf, const int64_t buf_len, int64_t *ppos, const char *s);
 
 inline const char *decode_vstr_nocopy(const char *buf, const int64_t data_len, int64_t *ppos, int64_t *lenp);
 

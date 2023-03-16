@@ -109,15 +109,15 @@ extern unsigned int mariadb_deinitialize_ssl;
 #define IS_NUM(t)	(((t) <= MYSQL_TYPE_INT24 && (t) != MYSQL_TYPE_TIMESTAMP) || (t) == MYSQL_TYPE_YEAR || (t) == MYSQL_TYPE_NEWDECIMAL || (t) == MYSQL_TYPE_OB_NUMBER_FLOAT)
 #define IS_LONGDATA(t) (((t) >= MYSQL_TYPE_TINY_BLOB && (t) <= MYSQL_TYPE_STRING) || ((t) == MYSQL_TYPE_OB_NVARCHAR2 || (t) == MYSQL_TYPE_OB_NCHAR))
 #define IS_NUM_FIELD(f)	 ((f)->flags & NUM_FLAG)
-#define INTERNAL_NUM_FIELD(f) (((f)->type <= MYSQL_TYPE_INT24 && ((f)->type != MYSQL_TYPE_TIMESTAMP || (f)->length == 14 || (f)->length == 8)) || (f)->type == MYSQL_TYPE_YEAR || (f)->type == MYSQL_TYPE_NEWDECIMAL || (f)->type == MYSQL_TYPE_DECIMAL)
+#define INTERNAL_NUM_FIELD(f) (((f)->type <= MYSQL_TYPE_INT24 && ((f)->type != MYSQL_TYPE_TIMESTAMP || (f)->length == 14 || (f)->length == 8)) || (f)->type == MYSQL_TYPE_YEAR || (f)->type == MYSQL_TYPE_NEWDECIMAL || (f)->type == MYSQL_TYPE_DECIMAL || (f)->type == MYSQL_TYPE_OB_NUMBER_FLOAT)
 
 #define IS_NUM_TERMINAL(t)      (((t) <= MYSQL_TYPE_INT24 && (t) != MYSQL_TYPE_TIMESTAMP) || (t) == MYSQL_TYPE_YEAR || (t) == MYSQL_TYPE_NEWDECIMAL || (t) == MYSQL_TYPE_OB_NUMBER_FLOAT)
 #define IS_NUM_BINARY_TERMINAL(t) ((t) == MYSQL_TYPE_FLOAT || (t) == MYSQL_TYPE_DOUBLE)
-enum ObRoutineParamInOut
+enum ObClientRoutineParamInOut
 {
-  SP_PARAM_IN = 1,
-  SP_PARAM_OUT = 2,
-  SP_PARAM_INOUT = 3,
+  OBCLIENT_SP_PARAM_IN = 1,
+  OBCLIENT_SP_PARAM_OUT = 2,
+  OBCLIENT_SP_PARAM_INOUT = 3,
 };
   typedef struct st_mysql_field {
     char *name;			/* Name of column */
@@ -141,7 +141,7 @@ enum ObRoutineParamInOut
     unsigned int flags;		/* Div flags */
     unsigned int decimals;	/* Number of decimals in field */
     unsigned int precision;
-    enum ObRoutineParamInOut ob_routine_param_inout;
+    enum ObClientRoutineParamInOut ob_routine_param_inout;
     my_bool is_implicit_rowid;
     unsigned int charsetnr;       /* char set number (added in 4.1) */
     unsigned char *owner_name;
@@ -412,6 +412,21 @@ struct st_mysql_options {
     unsigned long ob_proxy_version;
     unsigned long capability; // system varaiable
 } MYSQL;
+/**
+ * @brief 
+ *  For mysql_use_result, an additional buffer is needed to store rows.
+ *  Previously, mysql used the value in pkt directly as the value of row,
+ *  but some fields of ob need additional addresses, so a buffer needs to
+ *  be maintained here. If the buffer is not enough, it needs to be expanded,
+ *  and finally needs to be released
+ *  This structure is used as mysql->extension.res_extension field
+ */
+typedef struct st_ob_result_extension {
+  ulong pkt_len;
+  char *pkt_buffer;
+  MYSQL_FIELD *mysql_fields;
+} OB_RES_EXT;
+
 struct st_mysql_trace_info;
 struct ob_st_hash;
 #ifndef TYPE_DEFINE_OB_HASH
@@ -421,12 +436,13 @@ typedef struct ob_st_hash OB_HASH;
 typedef struct st_mysql_extension {
   MYSQL *mysql;
   OB_HASH *complex_type_hash;
-#define MAX_NLS_FORMAT_STR_LEN 256
-  unsigned char nls_date_format[MAX_NLS_FORMAT_STR_LEN];
-  unsigned char nls_timestamp_format[MAX_NLS_FORMAT_STR_LEN];
-  unsigned char nls_timestamp_tz_format[MAX_NLS_FORMAT_STR_LEN];
+#define OBCLIENT_MAX_NLS_FORMAT_STR_LEN 256
+  unsigned char nls_date_format[OBCLIENT_MAX_NLS_FORMAT_STR_LEN];
+  unsigned char nls_timestamp_format[OBCLIENT_MAX_NLS_FORMAT_STR_LEN];
+  unsigned char nls_timestamp_tz_format[OBCLIENT_MAX_NLS_FORMAT_STR_LEN];
   // struct st_mysql_trace_info *trace_data;
   // struct st_session_track_info state_change;
+  OB_RES_EXT res_extension;
 } MYSQL_EXTENSION;
 /* "Constructor/destructor" for MYSQL extension structure. */
 struct st_mysql_extension* mysql_extension_init(struct st_mysql*);

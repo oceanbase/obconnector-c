@@ -236,6 +236,12 @@ void mysql_extension_free(struct st_mysql_extension* ext)
   // // free state change related resources.
   // free_state_change_info(ext);
 
+  // free use result
+  if (ext->res_extension.pkt_buffer) {
+    free(ext->res_extension.pkt_buffer);
+    ext->res_extension.pkt_buffer = NULL;
+  }
+
   free(ext);
 }
 
@@ -999,7 +1005,7 @@ unpack_fields(const MYSQL *mysql,
     //use the filler to support oracle precision
     field->precision=  (uint) p[0];
     p++;
-    field->ob_routine_param_inout= (enum ObRoutineParamInOut) (p[0] & 0x3);
+    field->ob_routine_param_inout= (enum ObClientRoutineParamInOut) (p[0] & 0x3);
     field->is_implicit_rowid= (p[0] & 0x4) > 0 ? TRUE : FALSE;
     p++;
 
@@ -1731,14 +1737,26 @@ MYSQL_DATA *mthd_my_read_rows(MYSQL *mysql,MYSQL_FIELD *mysql_fields,
   return(result);
 }
 
+static int
+read_one_row_ob_extension_buffer_check(OB_RES_EXT *ob_res, ulong pkt) {
+  int ret = 0;
+  if (NULL == ob_res || 0 == pkt) {
+    ret = 1;
+  } else if (ob_res->pkt_len < pkt) {
+    ob_res->pkt_buffer = (char *) realloc(ob_res->pkt_buffer, pkt);
+    if (NULL == ob_res->pkt_buffer) {
+      ret = 1;
+    }
+  }
+  return ret;
+}
 
 /*
 ** Read one row. Uses packet buffer as storage for fields.
 ** When next packet is read, the previous field values are destroyed
 */
 
-
-int mthd_my_read_one_row(MYSQL *mysql,uint fields,MYSQL_ROW row, ulong *lengths)
+int mthd_my_read_one_row_backup(MYSQL *mysql,uint fields,MYSQL_ROW row, ulong *lengths)
 {
   uint field;
   ulong pkt_len,len;
@@ -1782,6 +1800,182 @@ int mthd_my_read_one_row(MYSQL *mysql,uint fields,MYSQL_ROW row, ulong *lengths)
   }
   row[field]=(char*) prev_pos+1;		/* End of last field */
   *prev_pos=0;					/* Terminate last field */
+  return 0;
+}
+
+
+int mthd_my_read_one_row(MYSQL *mysql,uint fields,MYSQL_ROW row, ulong *lengths)
+{
+  uint field;
+  ulong pkt_len,len;
+  uchar *pos,*prev_pos, *end_pos;
+
+  if ((pkt_len=(uint) ma_net_safe_read(mysql)) == packet_error)
+    return -1;
+
+  if (pkt_len <= 8 && mysql->net.read_pos[0] == 254)
+  {
+    mysql->warning_count= uint2korr(mysql->net.read_pos + 1);
+    mysql->server_status= uint2korr(mysql->net.read_pos + 3);
+    return 1;				/* End of data */
+  }
+  prev_pos= 0;				/* allowed to write at packet[-1] */
+  pos=mysql->net.read_pos;
+  end_pos=pos+pkt_len;
+
+  if (mysql->oracle_mode) {
+    ulong new_pkt_len = pkt_len;
+    ulong convert_len;
+    OB_RES_EXT *res_ext = &(((MYSQL_EXTENSION *)(mysql->ob_extension))->res_extension);
+    MYSQL_FIELD *mysql_fields = res_ext->mysql_fields;
+    char *to, *end_to;
+    uchar *cp = pos;
+
+    if (NULL == mysql_fields) {
+      return 1;
+    }
+
+    for (field=0 ; field < fields ; field++) {
+      if ((len=(ulong) net_field_length(&cp)) == NULL_LENGTH) {
+        continue;
+      }
+
+      //calculate the space for new type
+      if ((mysql_fields[field].type == MYSQL_TYPE_DATETIME
+              || mysql_fields[field].type == MYSQL_TYPE_OB_TIMESTAMP_NANO
+              || mysql_fields[field].type == MYSQL_TYPE_OB_TIMESTAMP_WITH_LOCAL_TIME_ZONE
+              || mysql_fields[field].type == MYSQL_TYPE_OB_TIMESTAMP_WITH_TIME_ZONE)) {
+        convert_len = calculate_new_time_length_with_nls(mysql, cp, len, mysql_fields[field].type);
+        //already include '/0' in the end
+        new_pkt_len = new_pkt_len - len + convert_len;
+      } else if (mysql_fields[field].type == MYSQL_TYPE_OB_RAW) {
+        convert_len = len * 2;
+        //already include '/0' in the end
+        new_pkt_len = new_pkt_len - len + convert_len;
+      } else if (mysql_fields[field].type == MYSQL_TYPE_OB_INTERVAL_YM
+                  || mysql_fields[field].type == MYSQL_TYPE_OB_INTERVAL_DS) {
+        convert_len = calculate_interval_length(cp, mysql_fields[field].type);
+        //already include '/0' in the end
+        new_pkt_len = new_pkt_len - len + convert_len;
+      }
+      cp+=len;
+    }
+
+    new_pkt_len += fields;   // for every field，add '\0' length
+
+    if (read_one_row_ob_extension_buffer_check(res_ext, new_pkt_len)) {
+      // error
+      return 1;
+    }
+
+    cp = pos;   //reset cpoy pos
+    to = res_ext->pkt_buffer;
+    end_to = to + new_pkt_len - 1;
+
+    for (field=0 ; field < fields ; field++)
+    {
+      if ((len=(ulong) net_field_length(&cp)) == NULL_LENGTH)
+      {						/* null field */
+        row[field] = 0;
+        *lengths++=0;
+      }
+      else
+      {
+        int is_done = 0;
+
+        row[field] = to;
+        if ((len > (ulong) (end_to - to))
+          && !(mysql->oracle_mode
+                && (mysql_fields[field].type == MYSQL_TYPE_DATETIME
+                    || mysql_fields[field].type == MYSQL_TYPE_OB_TIMESTAMP_NANO
+                    || mysql_fields[field].type == MYSQL_TYPE_OB_TIMESTAMP_WITH_LOCAL_TIME_ZONE
+                    || mysql_fields[field].type == MYSQL_TYPE_OB_TIMESTAMP_WITH_TIME_ZONE))
+          && mysql_fields[field].type != MYSQL_TYPE_OB_RAW
+          && mysql_fields[field].type != MYSQL_TYPE_OB_INTERVAL_YM
+          && mysql_fields[field].type != MYSQL_TYPE_OB_INTERVAL_DS)
+        {
+          mysql->net.last_errno=CR_UNKNOWN_ERROR;
+          strncpy(mysql->net.last_error,ER(mysql->net.last_errno),
+                  MYSQL_ERRMSG_SIZE - 1);
+          return -1;
+        }
+
+        if (mysql_fields) {
+          if ((mysql_fields[field].type == MYSQL_TYPE_DATETIME
+                  || mysql_fields[field].type == MYSQL_TYPE_OB_TIMESTAMP_NANO
+                  || mysql_fields[field].type == MYSQL_TYPE_OB_TIMESTAMP_WITH_LOCAL_TIME_ZONE
+                  || mysql_fields[field].type == MYSQL_TYPE_OB_TIMESTAMP_WITH_TIME_ZONE)) {
+            convert_len = rewrite_new_time_with_nls(mysql, cp, len, to, end_to - to + 1, mysql_fields[field].type);
+            to[convert_len]=0;
+            to+=convert_len+1;
+            cp+=len;
+            len = convert_len;
+            *lengths++=len;
+            is_done = 1;
+          } else if (mysql_fields[field].type == MYSQL_TYPE_OB_RAW) {
+            uchar *end = cp + len;
+            for(; cp < end; cp++, to+=2) {
+              sprintf(to, "%02X", *((uchar*)cp));
+            }
+
+            (*to++)=0;
+            len *= 2;
+            *lengths++=len;
+            is_done = 1;
+          } else if (mysql_fields[field].type == MYSQL_TYPE_OB_INTERVAL_YM
+                    || mysql_fields[field].type == MYSQL_TYPE_OB_INTERVAL_DS) {
+            if (!rewrite_interval(cp, to, (uint)(end_to - to), &convert_len, mysql_fields[field].type)) {
+              return 0;
+            }
+            to[convert_len]=0;
+            to+=convert_len+1;
+            cp+=len;
+            len = convert_len;
+            *lengths++=len;
+            is_done = 1;
+          }
+        }
+
+        if (!is_done) {
+          memcpy(to,(char*) cp,len); to[len]=0;
+          to+=len+1;
+          cp+=len;
+          *lengths++=len;
+          is_done = 1;
+        }
+
+        if (mysql_fields[field].max_length < len)
+          mysql_fields[field].max_length=len;
+      }
+    }
+  } else {
+    for (field=0 ; field < fields ; field++)
+    {
+      if ((len=(ulong) net_field_length(&pos)) == NULL_LENGTH)
+      {						/* null field */
+        row[field] = 0;
+        *lengths++=0;
+      }
+      else
+      {
+        if (len > (ulong) (end_pos - pos) || pos > end_pos)
+        {
+          mysql->net.last_errno=CR_UNKNOWN_ERROR;
+          strncpy(mysql->net.last_error,ER(mysql->net.last_errno),
+                  MYSQL_ERRMSG_SIZE - 1);
+          return -1;
+        }
+        row[field] = (char*) pos;
+        pos+=len;
+        *lengths++=len;
+      }
+      if (prev_pos)
+        *prev_pos=0;				/* Terminate prev field */
+      prev_pos=pos;
+    }
+    row[field]=(char*) prev_pos+1;		/* End of last field */
+    *prev_pos=0;					/* Terminate last field */
+  }
   return 0;
 }
 
@@ -1925,17 +2119,17 @@ ma_set_ob_connect_attrs(MYSQL *mysql)
   char cap_buf[OB_MAX_UINT64_BUF_LEN];
 
   if (mysql->can_use_protocol_ob20) {
-    cap |= OB_CAP_OB_PROTOCOL_V2;
-    cap |= OB_CAP_PROXY_NEW_EXTRA_INFO;
+    cap |= OBCLIENT_CAP_OB_PROTOCOL_V2;
+    cap |= OBCLIENT_CAP_PROXY_NEW_EXTRA_INFO;
     if (mysql->can_use_full_link_trace) {
-      cap |= OB_CAP_FULL_LINK_TRACE;
+      cap |= OBCLIENT_CAP_FULL_LINK_TRACE;
     } else {
-      cap &= ~OB_CAP_FULL_LINK_TRACE;
+      cap &= ~OBCLIENT_CAP_FULL_LINK_TRACE;
     }
   } else {
-    cap &= ~OB_CAP_OB_PROTOCOL_V2;
-    cap &= ~OB_CAP_FULL_LINK_TRACE;
-    cap &= ~OB_CAP_PROXY_NEW_EXTRA_INFO;
+    cap &= ~OBCLIENT_CAP_OB_PROTOCOL_V2;
+    cap &= ~OBCLIENT_CAP_FULL_LINK_TRACE;
+    cap &= ~OBCLIENT_CAP_PROXY_NEW_EXTRA_INFO;
   }
   
   snprintf(cap_buf, OB_MAX_UINT64_BUF_LEN, "%lu", cap);
@@ -2864,11 +3058,11 @@ static void mysql_close_memory(MYSQL *mysql)
   free(mysql->unix_socket);
   free(mysql->server_version);
   if (mysql->extension) {
-    mysql_extension_free((struct st_mysql_extension *)mysql->extension);
+    free(mysql->extension);
     mysql->extension = NULL;
   }
   if (mysql->ob_extension) {
-    free(mysql->ob_extension);
+    mysql_extension_free((struct st_mysql_extension *)mysql->ob_extension);
     mysql->ob_extension = NULL;
   }
   mysql->host_info= mysql->host= mysql->unix_socket=
@@ -3290,7 +3484,7 @@ mysql_real_query(MYSQL *mysql, const char *query, unsigned long length)
   int ret = 0;
   FLT_DECLARE;
 
-  // 全链路begin span相关
+  // flt begin span
   FLT_BEFORE_COMMAND(0, FLT_TAG_COMMAND_NAME, "\"mysql_real_query\"");
 
   if (length == (unsigned long)-1)
@@ -3304,7 +3498,7 @@ mysql_real_query(MYSQL *mysql, const char *query, unsigned long length)
     ret = (mysql->methods->db_read_query_result(mysql));
   }
 
-  // 全链路end span相关
+  // flt end span
   FLT_AFTER_COMMAND;
 
   return ret;
@@ -3367,6 +3561,7 @@ MYSQL_RES * STDCALL
 mysql_use_result(MYSQL *mysql)
 {
   MYSQL_RES *result;
+  OB_RES_EXT *res_ext;
 
   if (!mysql->fields)
     return(0);
@@ -3391,6 +3586,13 @@ mysql_use_result(MYSQL *mysql)
   result->current_field=0;
   result->handle=	mysql;
   result->current_row=	0;
+  if (mysql->oracle_mode && NULL == mysql->ob_extension) {
+    // error
+    return(0);
+  } else {
+    res_ext = &(((MYSQL_EXTENSION *)(mysql->ob_extension))->res_extension);
+    res_ext->mysql_fields = mysql->fields;
+  }
   mysql->fields=0;			/* fields is now in result */
   mysql->status=MYSQL_STATUS_USE_RESULT;
   return(result);			/* Data is read to be fetched */

@@ -45,10 +45,9 @@
       flt = ob20protocol->flt;                                          \
       if (OB_NOT_NULL(flt)) {                                           \
         if (mysql->server_status & SERVER_STATUS_IN_TRANS) {            \
-          /* 当前事务中每次 begin 之前需要 reset,防止 span 不够用*/           \
+          /* A reset is required before each begin in the current transaction to prevent insufficient span*/           \
           reset_span(flt->trace_);                                      \
         } else {                                                        \
-          /* 不在事务中再重新 begin trace */                               \
           BEGIN_TRACE(flt);                                             \
         }                                                               \
         span = BEGIN_SPAN(flt, span_level);                             \
@@ -76,7 +75,7 @@
         if (TRUE == trace->force_print_) {                                      \
           FLUSH_TRACE(flt);                                                     \
         } else if (TRUE == trace->slow_query_print_) {                          \
-          trace->slow_query_print_ = FALSE;   /* 每次请求就slow query置为FALSE */ \
+          trace->slow_query_print_ = FALSE;   /* Slow query is set to FALSE for each request */ \
           flush_first_span(trace);                                              \
         }                                                                       \
         if (mysql->server_status & SERVER_STATUS_IN_TRANS) {                    \
@@ -105,13 +104,13 @@
 #define DEFINE_TO_STRING_FUNC_FOR(type) \
   int tostring_##type(char *buf, const int64_t buf_len, int64_t *pos, type *src)
 
-// 当前维护每个trace大小为4k, 这个大小是整个trace期间分配的所有空间大小
+// Currently maintains a size of 4k for each trace, which is the size of all space allocated during the entire trace
 #define OBTRACE_DEFAULT_BUFFER_SIZE (1L << 12)
-// 当前驱动free span为4个
+// The current driver free span is 4
 #define SPAN_CACHE_COUNT (1L << 2)
-// 由于当前最多就一个SPAN，最大的LOG buffer为 1k
+// Since there is currently at most one SPAN, the largest LOG buffer is 1k
 #define MAX_TRACE_LOG_SIZE (1L << 10)
-// 当前全链路部分序列化后最大大小为 2k
+// The current maximum size of the full link after serialization is 2k
 #define MAX_FLT_SERIALIZE_SIZE (1L << 11)
 #define INIT_OFFSET (MAX_TRACE_LOG_SIZE + MAX_FLT_SERIALIZE_SIZE + SPAN_CACHE_COUNT * (sizeof(LIST) + sizeof(ObSpanCtx)))
 
@@ -150,9 +149,9 @@
 
 typedef struct st_obtrace ObTrace;
 /*
-0 ～ 999用于ob client 私有
-1000～1999用于ob proxy私有
-2000～65535用于全链路共有
+0 ～ 999 for obclient
+1000～1999 for obproxy
+2000～65535 for all
 */
 typedef enum enum_fulllinktraceextrainfoid
 {
@@ -172,6 +171,7 @@ typedef enum enum_fulllinktraceextrainfoid
   FLT_SAMPLE_PERCENTAGE,
   FLT_RECORD_POLICY,
   FLT_PRINT_SAMPLE_PCT,
+  FLT_SHOW_TRACE_ENABLE,
   FLT_SLOW_QUERY_THRES,
   // SPAN_INFO
   FLT_TRACE_ENABLE = 2030,
@@ -183,9 +183,9 @@ typedef enum enum_fulllinktraceextrainfoid
 } FullLinkTraceExtraInfoId;
 
 /*
-0 ～ 999用于ob client 私有
-1000～1999用于ob proxy私有
-2000～65535用于全链路共有
+0 ～ 999 for obclient
+1000～1999 for obproxy
+2000～65535 for all
 */
 typedef enum enum_fulllinktraceextrainfotype
 {
@@ -357,9 +357,9 @@ struct st_obtrace
     };
   };
   uint64_t log_buf_offset_;
-  char *log_buf_;   // 大小为:MAX_TRACE_LOG_SIZE
-  char *flt_serialize_buf_;  // 大小为:MAX_FLT_SERIALIZE_SIZE
-  char data_[0];   // 多分配的空间存储free span以及方便后续打tag时使用
+  char *log_buf_;   // size is MAX_TRACE_LOG_SIZE
+  char *flt_serialize_buf_;  // size is MAX_FLT_SERIALIZE_SIZE
+  char data_[0];   // Multi-allocated space to store free span and facilitate subsequent tagging
 };
 
 int trace_init();
@@ -368,7 +368,6 @@ void begin_trace(ObTrace *trace);
 void end_trace(ObTrace *trace);
 ObSpanCtx* begin_span(ObTrace *trace, uint32_t span_type, uint8_t level, my_bool is_follow);
 void end_span(ObTrace *trace, ObSpanCtx *span);
-// 当前在sql开始的时候需要调用reset接口将span清空, 防止事务中span过多
 void reset_span(ObTrace *trace);
 void append_tag(ObTrace *trace, ObSpanCtx *span, uint16_t tag_type, const char *str);
 ObTrace *get_trace_instance(FLTInfo *flt);
@@ -382,7 +381,6 @@ DEFINE_FLT_SERIALIZE_FUNC(spaninfo);        // FLT_SPAN_INFO
 DEFINE_FLT_SERIALIZE_FUNC(driverspaninfo);  // FLT_DRIVER_SPAN_INFO
 DEFINE_FLT_SERIALIZE_FUNC(nosupport);       // FLT_EXTRA_INFO_TYPE_END
 
-// 判断是否是合法的控制信息，如果不合法，不发送extra info
 my_bool flt_is_vaild(FLTInfo *flt);
 
 int serialize_UUID(char *buf, const int64_t buf_len, int64_t* pos, UUID *uuid);

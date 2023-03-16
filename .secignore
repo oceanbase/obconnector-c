@@ -68,6 +68,10 @@
   http://www.freedesktop.org/wiki/Software/pkg-config/)
   http://schemas.microsoft.com/office/word/2003/wordml
   http://www.php.net/software/
+  https://mirrors.aliyun.com/oceanbase/development-kit/el/7/aarch64/
+  https://mirrors.aliyun.com/oceanbase/development-kit/el/8/x86_64/
+  https://mirrors.aliyun.com/oceanbase/development-kit/el/8/aarch64/
+  https://mirrors.aliyun.com/oceanbase/development-kit/el/7/x86_64/
   jloup@gzip.org
   zlib@gzip.org
   info@winimage.com
@@ -96,6 +100,7 @@
   chongo@toad.com
   andrey@php.net
   someUser
+  Passw@rd2
 **/*.c
   http://www.gnu.org/licenses/
   http://www.gnu.org/licenses
@@ -106,6 +111,8 @@
 # The root patch shold start with '/'
 /BUILD/**
 /.secignore
+/azure-pipelines.yml
+/.git/**
 --------------------------------------------------------
 # Config the ignored fold to escape the Chinese scan by GLOB wildcard
 **/*.md
