@@ -128,9 +128,9 @@ int encode_vstr_with_len(char *buf, const int64_t buf_len, int64_t *ppos, const 
 
 int encode_vstr(char *buf, const int64_t buf_len, int64_t *ppos, const char *s);
 
-inline const char *decode_vstr_nocopy(const char *buf, const int64_t data_len, int64_t *ppos, int64_t *lenp);
+const char *decode_vstr_nocopy(const char *buf, const int64_t data_len, int64_t *ppos, int64_t *lenp);
 
-inline const char *decode_vstr(const char *buf, const int64_t data_len, int64_t *ppos,
+const char *decode_vstr(const char *buf, const int64_t data_len, int64_t *ppos,
                                char *dest, int64_t buf_len, int64_t *lenp);
 
 #define OB_UNIS_ENCODE(obj, type)                                       \

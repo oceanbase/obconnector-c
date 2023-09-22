@@ -201,13 +201,14 @@ int ma_net_flush(NET *net)
 int ma_net_write(NET *net, const uchar *packet, size_t len)
 {
   uchar buff[NET_HEADER_SIZE];
+  unsigned long max_packet_length = MAX_PACKET_LENGTH;
   // update ob20 request id
   if (net->use_ob20protocol && OB_NOT_NULL(net->ob20protocol)) {
     update_request_id(&net->ob20protocol->header.request_id);
   }
-  while (len >= MAX_PACKET_LENGTH)
+  while (len >= max_packet_length)
   {
-    const ulong max_len= MAX_PACKET_LENGTH;
+    const ulong max_len= max_packet_length;
     int3store(buff,max_len);
     buff[3]= (uchar)net->pkt_nr++;
     if (ma_net_write_buff(net,(char*) buff,NET_HEADER_SIZE) ||
@@ -233,6 +234,7 @@ int ma_net_write_command(NET *net, uchar command,
   size_t buff_size= NET_HEADER_SIZE + 1;
   size_t length= 1 + len; /* 1 extra byte for command */
   int rc;
+  unsigned long max_packet_length = MAX_PACKET_LENGTH;
 
   buff[NET_HEADER_SIZE]= 0;
   buff[4]=command;
@@ -242,26 +244,34 @@ int ma_net_write_command(NET *net, uchar command,
     update_request_id(&net->ob20protocol->header.request_id);
   }
 
-  if (length >= MAX_PACKET_LENGTH)
+  if (length >= max_packet_length)
   {
-    len= MAX_PACKET_LENGTH - 1;
+    len= max_packet_length - 1;
     do
     {
-      int3store(buff, MAX_PACKET_LENGTH);
-      buff[3]= (net->compress) ? 0 : (uchar) (net->pkt_nr++);
+      int3store(buff, max_packet_length);
+      if (net->use_ob20protocol) {
+        buff[3]= (uchar) (net->pkt_nr++);
+      } else {
+        buff[3]= (net->compress) ? 0 : (uchar) (net->pkt_nr++);
+      }
 
       if (ma_net_write_buff(net, (char *)buff, buff_size) ||
           ma_net_write_buff(net, packet, len))
         return(1);
       packet+= len;
-      length-= MAX_PACKET_LENGTH;
-      len= MAX_PACKET_LENGTH;
+      length-= max_packet_length;
+      len= max_packet_length;
       buff_size= NET_HEADER_SIZE; /* don't send command for further packets */
-    } while (length >= MAX_PACKET_LENGTH);
+    } while (length >= max_packet_length);
     len= length;
   }
   int3store(buff,length);
-  buff[3]= (net->compress) ? 0 :(uchar) (net->pkt_nr++);
+  if (net->use_ob20protocol) {
+    buff[3]= (uchar) (net->pkt_nr++);
+  } else {
+    buff[3]= (net->compress) ? 0 : (uchar) (net->pkt_nr++);
+  }
   rc= test (ma_net_write_buff(net,(char *)buff, buff_size) || 
       ma_net_write_buff(net,packet,len));
   if (!rc && !disable_flush)
@@ -292,39 +302,33 @@ static int ma_net_write_buff(NET *net,const char *packet, size_t len)
       if (ma_net_real_write(net,(char*) net->buff, 0)) {  // buffer为0，只写20头和extra info
         return 1;  // error
       }
-    } else if (extra_info_length + (size_t)(net->write_pos - net->buff) + len > MAX_PACKET_LENGTH_WITH_OB20) {
-      // 将当前的buffer和extra info写入到网络包中
-      if (ma_net_real_write(net,(char*) net->buff, (size_t)(net->write_pos - net->buff))) {
+    } else {
+      // do nothing
+    }
+
+    left_length=(size_t) (net->buff_end - net->write_pos);
+
+    if (net->use_ob20protocol && len > left_length && net->max_packet <= MAX_PACKET_LENGTH_WITH_OB20) {
+      size_t write_len = net->write_pos - net->buff;
+      size_t resize_len = len + write_len;
+
+      if (resize_len >= MAX_PACKET_LENGTH_WITH_OB20) {
+        resize_len = MAX_PACKET_LENGTH_WITH_OB20;
+      }
+      if (net_realloc(net, resize_len))
+      {
         return 1;
       }
-      net->write_pos= net->buff;
-    } else {
-      // 当前所有都能放入一个包中, 这个分支会走到最后memcpy，然后结束
+      net->write_pos += write_len;
+      left_length=(size_t) (net->buff_end - net->write_pos);
     }
   }
 
-  if (net->max_packet > MAX_PACKET_LENGTH && net->compress) {
-    if (net->use_ob20protocol) {
-      left_length= (size_t)(MAX_PACKET_LENGTH_WITH_OB20 - (net->write_pos - net->buff));
-    } else {
-      left_length= (size_t)(MAX_PACKET_LENGTH - (net->write_pos - net->buff));
-    }
+  if (net->max_packet > MAX_PACKET_LENGTH_WITH_OB20 && net->compress && net->use_ob20protocol) {
+    left_length= (size_t)(MAX_PACKET_LENGTH_WITH_OB20 - (net->write_pos - net->buff));
+  } else if (net->max_packet > MAX_PACKET_LENGTH && net->compress) {
+    left_length= (size_t)(MAX_PACKET_LENGTH - (net->write_pos - net->buff));
   } else {
-    left_length=(size_t) (net->buff_end - net->write_pos);
-  }
-
-  if (net->use_ob20protocol && len > left_length && net->buf_length < net->max_packet_size - 1) {
-    size_t write_len = net->write_pos - net->buff;
-    size_t resize_len = len + write_len;
-
-    if (resize_len >= net->max_packet_size) {
-      resize_len = net->max_packet_size - 1;
-    }
-    if (net_realloc(net, resize_len))
-    {
-      return 1;
-    }
-    net->write_pos += write_len;
     left_length=(size_t) (net->buff_end - net->write_pos);
   }
 
@@ -342,11 +346,11 @@ static int ma_net_write_buff(NET *net,const char *packet, size_t len)
     }
     if (net->compress)
     {
+      /* uncompressed length is stored in 3 bytes,so
+      packet can't be > 0xFFFFFF */
       if (net->use_ob20protocol) {
         left_length= MAX_PACKET_LENGTH_WITH_OB20;
       } else {
-        /* uncompressed length is stored in 3 bytes,so
-          packet can't be > 0xFFFFFF */
         left_length= MAX_PACKET_LENGTH;
       }
       while (len > left_length)
@@ -805,6 +809,7 @@ ulong ma_net_read(NET *net)
     net->read_pos[len]=0;		/* Safeguard for mysql_use_result */
   }
 #endif
+
   return (ulong)len;
 }
 

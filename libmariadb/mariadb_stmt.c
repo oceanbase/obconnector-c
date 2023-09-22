@@ -771,7 +771,7 @@ int STDCALL mysql_stmt_fetch_oracle_buffered_result(MYSQL_STMT *stmt)
     return(1);
   }
   /* just read the buffered result for some situation, not to fetch the result from ObServer any more */
-  if (rc = stmt_buffered_fetch(stmt, &row))
+  if ((rc = stmt_buffered_fetch(stmt, &row)))
   {
     stmt->state= MYSQL_STMT_FETCH_DONE;
     stmt->mysql->status= MYSQL_STATUS_READY;
@@ -1286,28 +1286,107 @@ static void store_param_str(MYSQL_STMT *stmt, int column, unsigned char **pos, u
   store_param_str_complex(pos, &header);
 }
 
+static void ob_client_mem_lob_common_to_buff(unsigned char** pos, uint32_t *len, ObClientMemLobCommon* common)
+{
+  uint32_t tmps = 0;
+  int4store(*pos, common->magic_);
+  *pos += 4; *len -= 4;
+  tmps <<= 15;
+  tmps |= common->reserved_;
+  tmps <<= 1;
+  tmps |= common->has_extern;
+  tmps <<= 1;
+  tmps |= common->is_simple;
+  tmps <<= 1;
+  tmps |= common->is_open_;
+  tmps <<= 1;
+  tmps |= common->is_inrow_;
+  tmps <<= 1;
+  tmps |= common->read_only_;
+  tmps <<= 4;
+  tmps |= common->type_;
+  tmps <<= 8;
+  tmps |= common->version_;
+  int4store(*pos, tmps);
+  *pos += 4; *len -= 4;
+}
+static void ob_client_mem_lob_extern_header_to_buff(unsigned char** pos, uint32_t *len, ObClientMemLobExternHeader *header)
+{
+  uint16_t tmps = 0;
+  int8store(*pos, header->snapshot_ver_);
+  *pos += 8; *len -= 8;
+  int8store(*pos, header->table_id_);
+  *pos += 8; *len -= 8;
+  int4store(*pos, header->column_idx_);
+  *pos += 4; *len -= 4;
+
+  tmps <<= 13;
+  tmps |= header->extern_flags_;
+  tmps <<= 1;
+  tmps |= header->has_view_info;
+  tmps <<= 1;
+  tmps |= header->has_cid_hash;
+  tmps <<= 1;
+  tmps |= header->has_tx_info;
+  int2store(*pos, tmps);
+  *pos += 2; *len -= 2;
+
+  int2store(*pos, header->rowkey_size_);
+  *pos += 2; *len -= 2;
+  int4store(*pos, header->payload_offset_);
+  *pos += 4; *len -= 4;
+  int4store(*pos, header->payload_size_);
+  *pos += 4; *len -= 4;
+}
+static void store_ob_lob_locator_v2(unsigned char** pos, uint32_t* len, OB_LOB_LOCATOR_V2* ob_lob_locator) {
+  ob_client_mem_lob_common_to_buff(pos, len, &ob_lob_locator->common);
+  if (ob_lob_locator->common.has_extern) {
+    ob_client_mem_lob_extern_header_to_buff(pos, len, &ob_lob_locator->extern_header);
+  }
+}
+static void store_ob_lob_locator_v1(unsigned char** pos, uint32_t *len, OB_LOB_LOCATOR* lob_locator){
+  int4store(*pos, lob_locator->magic_code_);
+  *pos += 4; *len -= 4;
+  int4store(*pos, lob_locator->version_);
+  *pos += 4; *len -= 4;
+  int8store(*pos, lob_locator->snapshot_version_);
+  *pos += 8; *len -= 8;
+  int8store(*pos, lob_locator->table_id_);
+  *pos += 8; *len -= 8;
+  int4store(*pos, lob_locator->column_id_);
+  *pos += 4; *len -= 4;
+  int2store(*pos, lob_locator->mode_);
+  *pos += 2; *len -= 2;
+  int2store(*pos, lob_locator->option_);
+  *pos += 2; *len -= 2;
+  int4store(*pos, lob_locator->payload_offset_);
+  *pos += 4; *len -= 4;
+  int4store(*pos, lob_locator->payload_size_);
+  *pos += 4; *len -= 4;
+}
+
 static void store_param_ob_lob_complex(unsigned char **pos, MYSQL_COMPLEX_BIND_HEADER *param)
 {
   OB_LOB_LOCATOR *lob_locator = (OB_LOB_LOCATOR *) param->buffer;
-  uchar buff[MAX_OB_LOB_LOCATOR_HEADER_LENGTH];
+  uint8_t version = get_ob_lob_locator_version(lob_locator);
+  if (version == OBCLIENT_LOB_LOCATORV1) {
+    uint32_t len = MAX_OB_LOB_LOCATOR_HEADER_LENGTH;
+    *pos = mysql_net_store_length(*pos, MAX_OB_LOB_LOCATOR_HEADER_LENGTH + lob_locator->payload_size_ + lob_locator->payload_offset_);
 
-  *pos = mysql_net_store_length(*pos, MAX_OB_LOB_LOCATOR_HEADER_LENGTH + lob_locator->payload_size_ + lob_locator->payload_offset_);
+    store_ob_lob_locator_v1(pos, &len, lob_locator);
 
-  int4store(buff, lob_locator->magic_code_);
-  int4store(buff + 4, lob_locator->version_);
-  int8store(buff + 8, lob_locator->snapshot_version_);
-  int8store(buff + 16, lob_locator->table_id_);
-  int4store(buff + 24, lob_locator->column_id_);
-  int2store(buff + 28, lob_locator->mode_);
-  int2store(buff + 30, lob_locator->option_);
-  int4store(buff + 32, lob_locator->payload_offset_);
-  int4store(buff + 36, lob_locator->payload_size_);
+    memcpy((char *)*pos, lob_locator->data_, lob_locator->payload_size_ + lob_locator->payload_offset_);
+    *pos += lob_locator->payload_size_ + lob_locator->payload_offset_;
+  } else if (version == OBCLIENT_LOB_LOCATORV2) {
+    uint32_t len = MAX_OB_LOB_LOCATOR_HEADER_LENGTH;
+    OB_LOB_LOCATOR_V2 *lob_locatorv2 = (OB_LOB_LOCATOR_V2 *)param->buffer;
+    *pos = mysql_net_store_length(*pos, MAX_OB_LOB_LOCATOR_HEADER_LENGTH + lob_locatorv2->extern_header.payload_size_ + lob_locatorv2->extern_header.payload_offset_);
+    
+    store_ob_lob_locator_v2(pos, &len, lob_locatorv2);
 
-  memcpy((char *)*pos, buff, MAX_OB_LOB_LOCATOR_HEADER_LENGTH);
-  *pos += MAX_OB_LOB_LOCATOR_HEADER_LENGTH;
-
-  memcpy((char *)*pos, lob_locator->data_, lob_locator->payload_size_ + lob_locator->payload_offset_);
-  *pos += lob_locator->payload_size_ + lob_locator->payload_offset_;
+    memcpy((char *)*pos, lob_locatorv2->data_, lob_locatorv2->extern_header.payload_size_ + lob_locatorv2->extern_header.payload_offset_);
+    *pos += lob_locatorv2->extern_header.payload_size_ + lob_locatorv2->extern_header.payload_offset_;
+  }
 }
 
 static void store_param_ob_lob(MYSQL_STMT *stmt, int column, unsigned char **pos, unsigned long row_nr)
@@ -1941,8 +2020,14 @@ static ulong calculate_param_ob_lob_len(MYSQL_BIND *param)
 
   if (NULL !=  param->buffer) {
     OB_LOB_LOCATOR *ob_lob_locator= (OB_LOB_LOCATOR *) param->buffer;
-    len = MAX_OB_LOB_LOCATOR_HEADER_LENGTH + ob_lob_locator->payload_offset_ + ob_lob_locator->payload_size_;
-    len += mysql_store_length_size(len);
+    if (OBCLIENT_LOB_LOCATORV1 == get_ob_lob_locator_version(ob_lob_locator)) {
+      len = MAX_OB_LOB_LOCATOR_HEADER_LENGTH + ob_lob_locator->payload_offset_ + ob_lob_locator->payload_size_;
+      len += mysql_store_length_size(len);
+    } else if (OBCLIENT_LOB_LOCATORV2 == get_ob_lob_locator_version(ob_lob_locator)) {
+      OB_LOB_LOCATOR_V2 *ob_lob_locatorv2 = (OB_LOB_LOCATOR_V2*)param->buffer;
+      len = MAX_OB_LOB_LOCATOR_HEADER_LENGTH + ob_lob_locatorv2->extern_header.payload_offset_ + ob_lob_locatorv2->extern_header.payload_size_;
+      len += mysql_store_length_size(len);
+    }
   }
   return len;
 }
@@ -2924,6 +3009,7 @@ int STDCALL mysql_stmt_fetch_column(MYSQL_STMT *stmt, MYSQL_BIND *bind, unsigned
       bind[0].error= &bind[0].error_value;
     *bind[0].error= 0;
     bind[0].offset= offset;
+    bind[0].mysql = stmt->mysql;
     save_ptr= stmt->bind[column].u.row_ptr;
     if (bind->piece_data_used)
       fetch_result_with_piece(&bind[0], &stmt->fields[column], &stmt->bind[column].u.row_ptr);
@@ -3050,6 +3136,7 @@ int STDCALL mysql_stmt_prepare(MYSQL_STMT *stmt, const char *query, unsigned lon
 {
   MYSQL *mysql= stmt->mysql;
   int rc= 1;
+  int ret = 0;
   my_bool is_multi= 0;
   FLT_DECLARE;
   
@@ -3099,8 +3186,13 @@ int STDCALL mysql_stmt_prepare(MYSQL_STMT *stmt, const char *query, unsigned lon
 
   FLT_BEFORE_COMMAND(0, FLT_TAG_COMMAND_NAME, "\"mysql_stmt_prepare\"");
 
-  if (mysql->methods->db_command(mysql, COM_STMT_PREPARE, query, length, 1, stmt))
+  ret = mysql->methods->db_command(mysql, COM_STMT_PREPARE, query, length, 1, stmt);
+  // end trace
+  FLT_AFTER_COMMAND;
+
+  if (ret) {
     goto fail;
+  }
 
   if (!is_multi && mysql->net.extension->multi_status == COM_MULTI_ENABLED && FALSE == get_use_protocol_ob20(mysql))
     ma_multi_command(mysql, COM_MULTI_END);
@@ -3157,10 +3249,7 @@ int STDCALL mysql_stmt_prepare(MYSQL_STMT *stmt, const char *query, unsigned lon
   }
   stmt->state = MYSQL_STMT_PREPARED;
 
-  // end trace
-  FLT_AFTER_COMMAND;
-  
-  return(0);
+   return(0);
 
 fail:
   stmt->state= MYSQL_STMT_INITTED;
@@ -4538,35 +4627,24 @@ my_bool determine_send_plarray_maxrarr_len(MYSQL *mysql)
   char* env = getenv("ENABLE_PLARRAY_MAXRARRLEN");
   if (env) {
     tmp_val = atoi(env);
-    if (tmp_val >= 0 && tmp_val < SEND_PLARRAY_MAXRARRLEN_FLAG_MAX)
-    {
+    if (tmp_val >= 0 && tmp_val < SEND_PLARRAY_MAXRARRLEN_FLAG_MAX) {
       ival = tmp_val;
     }
   }
-  if (ival == SEND_PLARRAY_MAXRARRLEN_FORCE_OPEN)
-  {
+  if (ival == SEND_PLARRAY_MAXRARRLEN_FORCE_OPEN) {
     bret = TRUE;
-  }
-  else if (ival == SEND_PLARRAY_MAXRARRLEN_FORCE_CLOSE)
-  {
+  } else if (ival == SEND_PLARRAY_MAXRARRLEN_FORCE_CLOSE) {
     bret = FALSE;
-  }
-  else if (NULL != mysql)
-  {
-    if (!mysql->oracle_mode)
-    {
+  } else if (NULL != mysql) {
+    if (!mysql->oracle_mode) {
       // only oracle mode use new protocol
-    }
-    else
-    {
-      if (mysql->ob_server_version >= SUPPORT_SEND_PLARRAY_MAXRARR_LEN)
-      {
+    } else {
+      if (mysql->ob_server_version >= SUPPORT_SEND_PLARRAY_MAXRARR_LEN) {
         bret = TRUE;
       }
     }
   }
-  if (mysql)
-  {
+  if (mysql) {
     mysql->can_send_plarray_maxrarr_len = bret;
   }
   DBUG_RETURN(bret);
@@ -4574,8 +4652,7 @@ my_bool determine_send_plarray_maxrarr_len(MYSQL *mysql)
 
 my_bool get_support_send_plarray_maxrarr_len(MYSQL *mysql)
 {
-  if (mysql)
-  {
+  if (mysql) {
     return mysql->can_send_plarray_maxrarr_len;
   }
   return FALSE;
@@ -4592,35 +4669,24 @@ my_bool determine_plarray_bindbyname(MYSQL *mysql)
   char* env = getenv("ENABLE_PLARRAY_BINDBYNAME");
   if (env) {
     tmp_val = atoi(env);
-    if (tmp_val >= 0 && tmp_val < PLARRAY_BINDBYNAME_FLAG_MAX)
-    {
+    if (tmp_val >= 0 && tmp_val < PLARRAY_BINDBYNAME_FLAG_MAX) {
       ival = tmp_val;
     }
   }
-  if (ival == PLARRAY_BINDBYNAME_FORCE_OPEN)
-  {
+  if (ival == PLARRAY_BINDBYNAME_FORCE_OPEN) {
     bret = TRUE;
-  }
-  else if (ival == PLARRAY_BINDBYNAME_FORCE_CLOSE)
-  {
+  } else if (ival == PLARRAY_BINDBYNAME_FORCE_CLOSE) {
     bret = FALSE;
-  }
-  else if (NULL != mysql)
-  {
-    if (!mysql->oracle_mode)
-    {
+  } else if (NULL != mysql) {
+    if (!mysql->oracle_mode) {
       // only oracle mode use new protocol
-    }
-    else
-    {
-      if (mysql->ob_server_version >= SUPPORT_PLARRAY_BINDBYNAME)
-      {
+    } else {
+      if (mysql->ob_server_version >= SUPPORT_PLARRAY_BINDBYNAME) {
         bret = TRUE;
       }
     }
   }
-  if (mysql)
-  {
+  if (mysql) {
     mysql->can_plarray_bindbyname = bret;
   }
   DBUG_RETURN(bret);
@@ -4628,8 +4694,7 @@ my_bool determine_plarray_bindbyname(MYSQL *mysql)
 
 my_bool get_support_plarray_bindbyname(MYSQL *mysql)
 {
-  if (mysql)
-  {
+  if (mysql) {
     return mysql->can_plarray_bindbyname;
   }
   return FALSE;
@@ -4647,21 +4712,16 @@ my_bool determine_protocol_ob20(MYSQL *mysql)
   char* env = getenv("ENABLE_PROTOCOL_OB20");
   if (env) {
     tmp_val = atoi(env);
-    if (tmp_val >= 0 && tmp_val < PROTOCOL_OB20_FLAY_MAX)
-    {
+    if (tmp_val >= 0 && tmp_val < PROTOCOL_OB20_FLAG_MAX) {
       ival = tmp_val;
     }
   }
-  if (ival == PROTOCOL_OB20_FORCE_OPEN)
-  {
+  if (ival == PROTOCOL_OB20_FORCE_OPEN) {
     bret = TRUE;
-  }
-  else if (ival == PROTOCOL_OB20_FORCE_CLOSE)
-  {
+  } else if (ival == PROTOCOL_OB20_FORCE_CLOSE) {
     bret = FALSE;
   }
-  if (mysql)
-  {
+  if (mysql) {
     mysql->can_use_protocol_ob20 = bret;
   }
   DBUG_RETURN(bret);
@@ -4684,21 +4744,16 @@ my_bool determine_full_link_trace(MYSQL *mysql)
   char* env = getenv("ENABLE_FLT");
   if (env) {
     tmp_val = atoi(env);
-    if (tmp_val >= 0 && tmp_val < PROTOCOL_FLT_FLAY_MAX)
-    {
+    if (tmp_val >= 0 && tmp_val < PROTOCOL_FLT_FLAG_MAX) {
       ival = tmp_val;
     }
   }
-  if (ival == PROTOCOL_FLT_FORCE_OPEN)
-  {
+  if (ival == PROTOCOL_FLT_FORCE_OPEN) {
     bret = TRUE;
-  }
-  else if (ival == PROTOCOL_FLT_FORCE_CLOSE)
-  {
+  } else if (ival == PROTOCOL_FLT_FORCE_CLOSE) {
     bret = FALSE;
   }
-  if (mysql)
-  {
+  if (mysql) {
     mysql->can_use_full_link_trace = bret;
   }
   DBUG_RETURN(bret);
@@ -4713,6 +4768,287 @@ my_bool get_use_full_link_trace(MYSQL *mysql)
       // do nothing, bret = TRUE;
     } else {
       bret = FALSE;
+    }
+  }
+  return bret;
+}
+
+my_bool determine_flt_show_trace(MYSQL *mysql)
+{
+  my_bool bret = TRUE;
+  int ival = FLT_SHOW_TRACE_AUTO_OPEN; //default is AUTO
+  int tmp_val = 0;
+  char* env = getenv("ENABLE_FLT_SHOW_TRACE");
+  if (env) {
+    tmp_val = atoi(env);
+    if (tmp_val >= 0 && tmp_val < FLT_SHOW_TRACE_FLAG_MAX) {
+      ival = tmp_val;
+    }
+  }
+  if (ival == FLT_SHOW_TRACE_FORCE_OPEN) {
+    bret = TRUE;
+  } else if (ival == FLT_SHOW_TRACE_FORCE_CLOSE) {
+    bret = FALSE;
+  }
+  if (mysql) {
+    mysql->can_use_flt_show_trace = bret;
+  }
+  DBUG_RETURN(bret);
+}
+
+my_bool get_use_flt_show_trace(MYSQL *mysql)
+{
+  my_bool bret = FALSE;
+  if (mysql && (mysql->capability & OBCLIENT_CAP_FULL_LINK_TRACE)
+    && (mysql->capability & OBCLIENT_CAP_PROXY_NEW_EXTRA_INFO)) {
+    bret = TRUE;
+    if (mysql->capability & OBCLIENT_CAP_PROXY_FULL_LINK_TRACE_SHOW_TRACE) {
+      // do nothing, bret = TRUE;
+    } else {
+      bret = FALSE;
+    }
+  }
+  return bret;
+}
+
+my_bool determine_ob_client_lob_locatorv2(MYSQL *mysql)
+{
+  my_bool bret = TRUE;
+  int ival = OB_CLIENT_LOB_LOCATORV2_AUTO_OPEN; //default is AUTO
+  int tmp_val = 0;
+  char* env = getenv("ENABLE_OB_CLIENT_LOB_LOCATORV2");
+  if (env) {
+    tmp_val = atoi(env);
+    if (tmp_val >= 0 && tmp_val < OB_CLIENT_LOB_LOCATORV2_FLAY_MAX) {
+      ival = tmp_val;
+    }
+  }
+  if (ival == OB_CLIENT_LOB_LOCATORV2_FORCE_OPEN) {
+    bret = TRUE;
+  } else if (ival == OB_CLIENT_LOB_LOCATORV2_FORCE_CLOSE) {
+    bret = FALSE;
+  }
+  if (mysql) {
+    mysql->can_use_ob_client_lob_locatorv2 = bret;
+  }
+  DBUG_RETURN(bret);
+}
+my_bool get_use_ob_client_lob_locatorv2(MYSQL *mysql)
+{
+  if (mysql) {
+    return mysql->can_use_ob_client_lob_locatorv2;
+  }
+  return FALSE;
+}
+
+uint8_t get_ob_lob_locator_version(void *lob)
+{
+  uint8_t ver = 0;
+  if (NULL == lob) {
+    ver = 0;
+  } else {
+    ObClientMemLobCommon *plob = (ObClientMemLobCommon*)lob;
+    ver = plob->version_;
+  }
+  return ver;
+}
+int64_t get_ob_lob_payload_data_len(void *lob)
+{
+  int64_t len = -1;
+  if (NULL == lob) {
+    len = -1;
+  } else {
+    ObClientMemLobCommon *plob = (ObClientMemLobCommon*)lob;
+    if (plob->version_ == OBCLIENT_LOB_LOCATORV1) {
+      OB_LOB_LOCATOR *tmp = (OB_LOB_LOCATOR*)lob;
+      len = tmp->payload_size_;
+    } else if (plob->version_ == OBCLIENT_LOB_LOCATORV2) {
+      OB_LOB_LOCATOR_V2 *tmp = (OB_LOB_LOCATOR_V2*)lob;
+      if (0 == tmp->common.has_extern)
+        len = -1;
+
+      if (tmp->common.is_inrow_) {
+        len = tmp->extern_header.payload_size_;
+      } else {
+        //这种情况下的数据大小是位置在
+        //sizeof(ObMemLobCommon ) + sizeof(ObMemLobExternHeader) + sizeof(uint16)+ ex_size + rowkey_size + sizeof(ObLobCommon)+sizeof(ObLobData)
+        int tmp_len = tmp->extern_header.payload_offset_+ tmp->extern_header.payload_size_;
+        char *tmp_buf = tmp->data_;
+        uint16_t ex_size = uint2korr(tmp_buf);
+        int offset = MAX_OB_LOB_LOCATOR_HEADER_LENGTH + sizeof(uint16) + ex_size + tmp->extern_header.rowkey_size_ + sizeof(ObClientLobCommon) + sizeof(ObClientLobData);
+        if (tmp_len > offset) {
+          len = uint8korr(tmp_buf + offset - 8);
+        }
+      }
+    }
+  }
+  return len;
+}
+
+int prepare_execute_v2(MYSQL *mysql, MYSQL_STMT* stmt, const char* query, MYSQL_BIND* params) {
+  int ret = 0;
+  int length = strlen(query);
+  if (get_use_prepare_execute(mysql)) {
+    void* extend_arg = NULL;
+    if (mysql_stmt_prepare_v2(stmt, query, length, extend_arg)) {
+      ret = -1;
+    } else if (params && mysql_stmt_bind_param(stmt, params)) {
+      ret = -1;
+    } else if (mysql_stmt_execute_v2(stmt, query, length, 1, 0, extend_arg)) {
+      ret = -1;
+    }
+  } else {
+    if (mysql_stmt_prepare(stmt, query, length)) {
+      ret = -1;
+    } else if (params && mysql_stmt_bind_param(stmt, params)) {
+      ret = -1;
+    } else if (mysql_stmt_execute(stmt)) {
+      ret = -1;
+    }
+  }
+  return ret;
+}
+int stmt_get_data_from_lobv2( MYSQL *mysql, void * lob, enum_field_types type, 
+  int64_t char_offset, int64_t byte_offset, int64_t char_len, int64_t byte_len, char *buf, const int64_t buf_len, int64_t *data_len, int64_t *act_len)
+{
+  int ret = -1;
+  const char *read_sql = "call DBMS_LOB.read(?, ?, ?, ?)";
+  MYSQL_BIND param_bind[4];
+  MYSQL_BIND param_res[2];
+  MYSQL_STMT* stmt = NULL;
+  int64_t length = 0;
+  OB_LOB_LOCATOR_V2 *loblocator = (OB_LOB_LOCATOR_V2*)lob;
+
+  char_offset = char_offset;
+  char_len = char_len;
+
+  if (!mysql) {
+    SET_CLIENT_STMT_ERROR(stmt, CR_SERVER_LOST, unknown_sqlstate, NULL);
+    DBUG_RETURN(1);
+  }
+  if (NULL == lob) {
+    SET_CLIENT_STMT_ERROR(stmt, CR_UNKNOWN_ERROR, unknown_sqlstate, NULL);
+    DBUG_RETURN(1);
+  }
+  if (OBCLIENT_LOB_LOCATORV2 != get_ob_lob_locator_version(lob)) {
+    SET_CLIENT_STMT_ERROR(stmt, CR_UNKNOWN_ERROR, unknown_sqlstate, NULL);
+    DBUG_RETURN(1);
+  }
+  if (type != MYSQL_TYPE_ORA_CLOB && type != MYSQL_TYPE_ORA_BLOB) {
+    SET_CLIENT_STMT_ERROR(stmt, CR_UNKNOWN_ERROR, unknown_sqlstate, NULL);
+    DBUG_RETURN(1);
+  }
+  if (1 != loblocator->common.has_extern) {
+    SET_CLIENT_STMT_ERROR(stmt, CR_UNKNOWN_ERROR, unknown_sqlstate, NULL);
+    DBUG_RETURN(1);
+  }
+
+  if (1 == loblocator->common.is_inrow_) {
+    length = byte_len > buf_len ? buf_len : byte_len;
+    length = length > loblocator->extern_header.payload_size_ ? loblocator->extern_header.payload_size_ : length;
+    memcpy(buf, loblocator->data_ + loblocator->extern_header.payload_offset_, length);
+    if (data_len)
+      *data_len = length;
+    if (act_len)
+      *act_len = loblocator->extern_header.payload_size_;
+    ret = 0;
+  } else {
+    int64_t tmp_len = byte_len + 1;
+    char *tmp_buf = calloc(1, byte_len);
+    if (NULL != tmp_buf) {
+      //params
+      memset(param_bind, 0, sizeof(param_bind));
+      param_bind[0].buffer = lob;
+      param_bind[0].buffer_length = loblocator->extern_header.payload_size_ + loblocator->extern_header.payload_offset_ + MAX_OB_LOB_LOCATOR_HEADER_LENGTH;
+      param_bind[0].buffer_type = type;
+      param_bind[1].buffer = (char *)&tmp_len;
+      param_bind[1].buffer_type = MYSQL_TYPE_LONGLONG;
+      param_bind[2].buffer = (char *)&byte_offset;
+      param_bind[2].buffer_type = MYSQL_TYPE_LONGLONG;
+      param_bind[3].is_null = &param_bind[3].is_null_value;
+      *param_bind[3].is_null = 1;
+      if (MYSQL_TYPE_ORA_CLOB == type) {
+        param_bind[3].buffer_type = MYSQL_TYPE_VAR_STRING;
+      } else {
+        param_bind[3].buffer_type = MYSQL_TYPE_OB_RAW;
+      }
+
+      //result
+      memset(param_res, 0, sizeof(param_res));
+      param_res[0].error = &param_res[0].error_value;
+      param_res[0].is_null = &param_res[0].is_null_value;
+      param_res[0].buffer = &length;
+      param_res[0].buffer_type = MYSQL_TYPE_LONGLONG;
+      param_res[1].error = &param_res[1].error_value;
+      param_res[1].is_null = &param_res[1].is_null_value;
+      param_res[1].length = &param_res[1].length_value;
+      param_res[1].buffer = tmp_buf;
+      param_res[1].buffer_length = tmp_len;
+      if (MYSQL_TYPE_ORA_CLOB == type) {
+        param_res[1].buffer_type = MYSQL_TYPE_VAR_STRING;
+      } else {
+        param_res[1].buffer_type = MYSQL_TYPE_OB_RAW;
+      }
+
+      if (NULL == (stmt = mysql_stmt_init(mysql))) {
+        ret = -1;
+      } else if (prepare_execute_v2(mysql, stmt, read_sql, param_bind)) {
+        ret = -1;
+      } else if (mysql_stmt_bind_result(stmt, param_res)) {
+        ret = -1;
+      } else {
+        ret = mysql_stmt_fetch(stmt);
+        if (0 == ret) {
+          *data_len = param_res[1].length_value;
+          *act_len = *data_len;
+          if (*data_len > byte_len) {
+            *data_len = byte_len > buf_len ? buf_len : byte_len;
+          } else {
+            *data_len = *data_len > buf_len ? buf_len : *data_len;
+          }
+          memcpy(buf, tmp_buf, *data_len);
+        }
+      }
+
+      if (NULL != stmt) {
+        mysql_stmt_close(stmt);
+      }
+
+      free(tmp_buf);
+      tmp_buf = NULL;
+    }
+  }
+  return ret;
+}
+
+my_bool set_nls_format(MYSQL *mysql)
+{
+  my_bool bret = TRUE;
+  if (mysql->oracle_mode) {
+    char *nls_date_format = getenv("NLS_DATE_FORMAT");
+    char *nls_timestamp_format = getenv("NLS_TIMESTAMP_FORMAT");
+    char *nls_timestamp_tz_format = getenv("NLS_TIMESTAMP_TZ_FORMAT");
+
+    if (NULL != nls_date_format) {
+      char change_date_format_sql[100];
+      snprintf(change_date_format_sql, 100, "ALTER SESSION SET NLS_DATE_FORMAT='%s';", nls_date_format);
+      if (mysql_query(mysql, change_date_format_sql)) {
+        bret = FALSE;
+      }
+    }
+    if (bret && NULL != nls_timestamp_format) {
+      char change_timestamp_format_sql[100];
+      snprintf(change_timestamp_format_sql, 100, "ALTER SESSION SET NLS_TIMESTAMP_FORMAT='%s';", nls_timestamp_format);
+      if (mysql_query(mysql, change_timestamp_format_sql)) {
+        bret = FALSE;
+      }
+    }
+    if (bret && NULL != nls_timestamp_tz_format) {
+      char change_timestamp_tz_format_sql[100];
+      snprintf(change_timestamp_tz_format_sql, 100, "ALTER SESSION SET NLS_TIMESTAMP_TZ_FORMAT='%s';", nls_timestamp_tz_format);
+      if (mysql_query(mysql, change_timestamp_tz_format_sql)) {
+        bret = FALSE;
+      }
     }
   }
   return bret;
@@ -5334,10 +5670,12 @@ static int madb_update_stmt_fields(MYSQL_STMT *stmt) // same as update_stmt_fiel
     if (MYSQL_TYPE_OBJECT == field->type && NULL == stmt_field->owner_name && NULL != field->owner_name) {
       stmt_field->owner_name= (unsigned char *)ma_memdup_root(fields_ma_alloc_root,
                                                               (char*)field->owner_name,
-                                                              field->owner_name_length);
+                                                              field->owner_name_length+1);
+      stmt_field->owner_name[field->owner_name_length] = 0;
       stmt_field->type_name= (unsigned char *)ma_memdup_root(fields_ma_alloc_root,
                                                               (char*)field->type_name,
-                                                              field->type_name_length);
+                                                              field->type_name_length+1);
+      stmt_field->type_name[field->type_name_length] = 0;
     }
   }
   return 0;

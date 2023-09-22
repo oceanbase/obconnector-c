@@ -337,6 +337,10 @@ SET(MARIADB_NONBLOCK_SYMBOLS
  ob_delete_thread_key
  ob_get_thread_key
  ob_set_thread_key
+#for lobv2
+ get_ob_lob_locator_version
+ get_ob_lob_payload_data_len
+ stmt_get_data_from_lobv2
 )
 
 # handle static plugins
@@ -383,7 +387,7 @@ ob_strtoll10.c
 ob_oracle_format_models.c
 ob_thread.c
 ob_serialize.c
-#ob_object.c
+ob_object.c
 ob_full_link_trace.c
 ob_rwlock.c
 ob_cond.c
@@ -540,10 +544,27 @@ IF(WITH_MYSQLCOMPAT)
   ENDIF()
 ENDIF()
 
+IF(UNIX)
+  IF(CMAKE_SYSTEM_NAME MATCHES "FreeBSD" OR APPLE)
+    SET(OS_SHARED_LIB_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}")
+  ELSE()
+    if(${SHARED_LIB_EXTRA_VERSION})
+      SET(OS_SHARED_LIB_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}.${CPACK_PACKAGE_VERSION_EXTRA}")
+    ELSE()
+      SET(OS_SHARED_LIB_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
+    ENDIF()
+  ENDIF()
+  SET_TARGET_PROPERTIES(libobclnt PROPERTIES
+                          OUTPUT_NAME libobclnt
+                          VERSION "${OS_SHARED_LIB_VERSION}"
+                          SOVERSION "${CPACK_PACKAGE_VERSION_MAJOR}")
+ENDIF()
 
-SET_TARGET_PROPERTIES(libobclnt PROPERTIES VERSION
- ${CPACK_PACKAGE_VERSION_MAJOR}
- SOVERSION ${CPACK_PACKAGE_VERSION_MAJOR})
+IF(WIN32)
+  SET_TARGET_PROPERTIES(libobclnt PROPERTIES VERSION
+   ${CPACK_PACKAGE_VERSION_MAJOR}
+   SOVERSION ${CPACK_PACKAGE_VERSION_MAJOR})
+ENDIF()
 
 IF(NOT WIN32)
   SET_TARGET_PROPERTIES(obclnt PROPERTIES OUTPUT_NAME "${LIBMARIADB_STATIC_NAME}")

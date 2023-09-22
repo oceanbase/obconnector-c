@@ -60,6 +60,9 @@ if (OB_NOT_NULL(span) && 0 == span->span_id_.high_) {             \
     FLT_EXTRA_INFO_DEF(FLT_TRACE_ID, MYSQL_TYPE_VAR_STRING);              \
     FLT_EXTRA_INFO_DEF(FLT_REF_TYPE, MYSQL_TYPE_TINY);                    \
     FLT_EXTRA_INFO_DEF(FLT_SPAN_ID, MYSQL_TYPE_VAR_STRING);               \
+    /* SHOW_TRACE_SPAN */                                                 \
+    FLT_EXTRA_INFO_DEF(FLT_DRV_SHOW_TRACE_SPAN, MYSQL_TYPE_VAR_STRING);   \
+    FLT_EXTRA_INFO_DEF(FLT_PROXY_SHOW_TRACE_SPAN, MYSQL_TYPE_VAR_STRING); \
     FLT_EXTRA_INFO_DEF(FLT_EXTRA_INFO_ID_END, MAX_NO_FIELD_TYPES);        \
   } while (0);
 #define FLT_SERIALIZE_FUNC_SET(id, funcname) (flt_funcs[id] = (FLTFunc)FLT_SERIALIZE_FUNC(funcname))
@@ -76,6 +79,8 @@ if (OB_NOT_NULL(span) && 0 == span->span_id_.high_) {             \
     FLT_SERIALIZE_FUNC_SET(FLT_CONTROL_INFO, controlinfo);                \
     /* SPAN_INFO */                                                       \
     FLT_SERIALIZE_FUNC_SET(FLT_SPAN_INFO, spaninfo);                      \
+    /* SHOW_TRACE_SPAN */                                                 \
+    FLT_SERIALIZE_FUNC_SET(FLT_TYPE_SHOW_TRACE_SPAN, showtracespan);      \
   } while (0);
 
 const char *tag_str[FLT_TAG_MAX_TYPE] = 
@@ -132,6 +137,7 @@ int flt_init(FLTInfo *flt)
 
     memset(flt, 0, sizeof(*flt));
 
+    flt->show_trace_span_.type_ = FLT_TYPE_SHOW_TRACE_SPAN;
     flt->client_span_.type_ = FLT_DRIVER_SPAN_INFO;
     flt->app_info_.type_ = FLT_APP_INFO;
     flt->query_info_.type_ = FLT_QUERY_INFO;
@@ -145,6 +151,7 @@ int flt_init(FLTInfo *flt)
     flt->control_info_.rp_ = MAX_RECORD_POLICY;
     flt->control_info_.print_sample_pct_ = -1;
     flt->control_info_.slow_query_threshold_ = -1;
+    flt->control_info_.flt_show_trace_enable_ = 0;
 
     if (OB_FAIL(trace_init(flt))) {
       // trace init error;
@@ -188,6 +195,7 @@ int flt_build_request(MYSQL *mysql, FLTInfo *flt)
     int32_t span_info_serialize_size = 0;
     int32_t client_log_serialize_size = 0;
     int32_t app_info_serialize_size = 0;
+    int32_t show_trace_serialize_size = 0;
     int64_t tmp_trace_id_pos = 0;
     int64_t tmp_span_id_pos = 0;
 
@@ -221,20 +229,35 @@ int flt_build_request(MYSQL *mysql, FLTInfo *flt)
         flt->client_span_.client_span_ = NULL;
       }
 
+      if (1 < trace->show_trace_buf_offset_ && trace->show_trace_enable_) {
+        flt->show_trace_span_.client_span_json_ = trace->show_trace_buf_;
+        // Change the final comma to a parenthesis
+        trace->show_trace_buf_[trace->show_trace_buf_offset_ - 1] = ']';
+      } else {
+        flt->show_trace_span_.client_span_json_ = NULL;
+      }
+
       if (OB_FAIL(flt_get_serialize_size_extra_info(&app_info_serialize_size, &flt->app_info_))) {
         // error
       } else if (OB_FAIL(flt_get_serialize_size_extra_info(&client_log_serialize_size, &flt->client_span_))) {
         // error
       } else if (OB_FAIL(flt_get_serialize_size_extra_info(&span_info_serialize_size, &flt->span_info_))) {
         // error
+      } else if (OB_FAIL(flt_get_serialize_size_extra_info(&show_trace_serialize_size, &flt->show_trace_span_))) {
+        // error
       } else {
         serialize_size += app_info_serialize_size;
         serialize_size += client_log_serialize_size;
         serialize_size += span_info_serialize_size;
+        serialize_size += show_trace_serialize_size;
 #ifdef DEBUG_OB20
-          printf("spaninfo ssize is %d, log ssize is %d, appinfo ssize %d\n", span_info_serialize_size, client_log_serialize_size, app_info_serialize_size);
+          printf("spaninfo ssize:%d, log ssize:%d, appinfo ssize:%d, show trace ssize:%d\n", span_info_serialize_size, 
+              client_log_serialize_size, app_info_serialize_size, show_trace_serialize_size);
           if (0 != client_log_serialize_size) {
             printf("log:%s\n", flt->client_span_.client_span_);
+          }
+          if (0 != show_trace_serialize_size) {
+            printf("log:%s\n", flt->show_trace_span_.client_span_json_);
           }
 #endif
       }
@@ -256,6 +279,10 @@ int flt_build_request(MYSQL *mysql, FLTInfo *flt)
             // error
           } else if (pos != span_info_serialize_size + client_log_serialize_size) {
             ret = OB_ERROR;
+          } else if (0 != show_trace_serialize_size && OB_FAIL(flt_serialize_extra_info(flt->flt_value_data_.value_data_, serialize_size, &pos, &flt->show_trace_span_))) {
+            // error
+          } else if (pos != span_info_serialize_size + client_log_serialize_size + show_trace_serialize_size) {
+            ret = OB_ERROR;
           } else if (0 != app_info_serialize_size && OB_FAIL(flt_serialize_extra_info(flt->flt_value_data_.value_data_, serialize_size, &pos, &flt->app_info_))) {
             // error
           } else if (pos != serialize_size) {
@@ -269,6 +296,10 @@ int flt_build_request(MYSQL *mysql, FLTInfo *flt)
             // reset the log buf offset
             trace->log_buf_offset_ = 0;
             flt->client_span_.client_span_ = NULL;
+            // reset show trace log buffer
+            trace->show_trace_buf_[0] = '[';
+            trace->show_trace_buf_offset_ = 1;
+            flt->show_trace_span_.client_span_json_ = NULL;
           }
           if (OB_SUCC(ret)) {
             if (OB_FAIL(ob20_set_extra_info(mysql, FULL_TRC, &flt->flt_value_data_))) {
@@ -328,11 +359,12 @@ int flt_get_serialize_size_controlinfo(int32_t *size, void *flt_info)
   UNUSED(flt_info);
 
   local_size += TYPE_LENGTH + LEN_LENGTH;
-  local_size += flt_get_store_int1_size();
-  local_size += flt_get_store_double_size();
-  local_size += flt_get_store_int1_size();
-  local_size += flt_get_store_double_size();
-  local_size += flt_get_store_int8_size();
+  local_size += flt_get_store_int1_size();   // type_
+  local_size += flt_get_store_double_size(); // sample_pct_
+  local_size += flt_get_store_int1_size();   // rp_
+  local_size += flt_get_store_double_size(); // print_sample_pct_
+  local_size += flt_get_store_int8_size();   // slow_query_threshold_
+  local_size += flt_get_store_int8_size();   // flt_show_trace_enable_
 
   *size = local_size;
   return ret;
@@ -360,6 +392,8 @@ int flt_serialize_controlinfo(char *buf, const int64_t len, int64_t *pos, void *
   } else if (OB_FAIL(flt_store_double(buf, len, pos, control_info->print_sample_pct_, FLT_PRINT_SAMPLE_PCT))) {
     ret = OB_ERROR;
   } else if (OB_FAIL(flt_store_int8(buf, len, pos, control_info->slow_query_threshold_, FLT_SLOW_QUERY_THRES))) {
+    ret = OB_ERROR;
+  } else if (OB_FAIL(flt_store_int8(buf, len, pos, control_info->flt_show_trace_enable_, FLT_SHOW_TRACE_ENABLE))) {
     ret = OB_ERROR;
   } else {
     // fill type and len in the head
@@ -431,6 +465,16 @@ int flt_deserialize_field_controlinfo(FullLinkTraceExtraInfoId extra_id, const i
         // do nothing
 #ifdef DEBUG_OB20
           printf("slow_query_threshold is %ld\n", flt_control_info->slow_query_threshold_);
+#endif
+      }
+      break;
+    }
+    case FLT_SHOW_TRACE_ENABLE: {
+      if (OB_FAIL(flt_get_int1(buf, len, pos, v_len, &flt_control_info->flt_show_trace_enable_))) {
+        ret = OB_ERROR;
+      } else {
+#ifdef DEBUG_OB20
+          printf("show_trace_enable is %hhd\n", flt_control_info->flt_show_trace_enable_);
 #endif
       }
       break;
@@ -544,7 +588,7 @@ int flt_deserialize_field_appinfo(FullLinkTraceExtraInfoId extra_id, const int64
       break;
     }
     default: {
-      // get an unrecognized key here, skip it directly
+      // get an unrecognized key here, skip it directly 
       *pos += *pos + v_len;
       break;
     }
@@ -619,7 +663,7 @@ int flt_deserialize_field_queryinfo(FullLinkTraceExtraInfoId extra_id, const int
       break;
     }
     default: {
-      // get an unrecognized key here, skip it directly
+      // get an unrecognized key here, skip it directly 
       *pos += *pos + v_len;
       break;
     }
@@ -796,6 +840,72 @@ int flt_deserialize_field_driverspaninfo(FullLinkTraceExtraInfoId extra_id, cons
   switch(extra_id) {
     case FLT_CLIENT_IDENTIFIER: {
       if (OB_FAIL(flt_get_str(buf, len, pos, v_len, (char **)&client_info->client_span_))) {
+        ret = OB_ERROR;
+      } else {
+        // do nothing
+      }
+      break;
+    }
+    default: {
+      *pos += *pos + v_len;
+      break;
+    }
+  }
+  return ret;
+}
+// for driverspaninfo info
+
+// for show trace span
+int flt_get_serialize_size_showtracespan(int32_t *size, void *flt_info)
+{
+  int ret = OB_SUCCESS;
+  int32_t local_size = 0;
+  FLTShowTraceSpan *show_trace_span = (FLTShowTraceSpan *)flt_info;
+
+  if (NULL != show_trace_span->client_span_json_) {
+    local_size += TYPE_LENGTH + LEN_LENGTH;
+    local_size += flt_get_store_str_size(strlen(show_trace_span->client_span_json_) + 1);
+  }
+
+  *size = local_size;
+  return ret;
+}
+
+int flt_serialize_showtracespan(char *buf, const int64_t len, int64_t *pos, void *flt_info)
+{
+  int ret = OB_SUCCESS;
+  int64_t org_pos = *pos;
+  FLTShowTraceSpan *show_trace_span = (FLTShowTraceSpan *)flt_info;
+  // resrver for type and len
+  if (*pos + 6 > len) {
+    ret = OB_SIZE_OVERFLOW;
+  } else {
+    *pos += 6;
+  }
+  if (OB_FAIL(ret)) {
+    // do nothing
+  } else if (OB_FAIL(flt_store_str(buf, len, pos, show_trace_span->client_span_json_, strlen(show_trace_span->client_span_json_) + 1, FLT_DRV_SHOW_TRACE_SPAN))) {
+    ret = OB_ERROR;
+  } else {
+    // fill type and len in the head
+    int32_t total_len = *pos - org_pos - 6;
+    if (OB_FAIL(flt_store_type_and_len(buf, len, &org_pos, show_trace_span->type_, total_len))) {
+      ret = OB_ERROR;
+    } else {
+      // do nothing
+    }
+  }
+  return ret;
+}
+
+int flt_deserialize_field_showtracespan(FullLinkTraceExtraInfoId extra_id, const int64_t v_len,
+                                        const char *buf, const int64_t len, int64_t *pos, void *flt_info)
+{
+  int ret = OB_SUCCESS;
+  FLTShowTraceSpan *show_trace_span = (FLTShowTraceSpan *)flt_info;
+  switch(extra_id) {
+    case FLT_CLIENT_IDENTIFIER: {
+      if (OB_FAIL(flt_get_str(buf, len, pos, v_len, (char **)&show_trace_span->client_span_json_))) {
         ret = OB_ERROR;
       } else {
         // do nothing
@@ -1281,18 +1391,31 @@ int trace_init(FLTInfo *flt)
       memset(trace, 0, sizeof(*trace));
       trace->buffer_size_ = OBTRACE_DEFAULT_BUFFER_SIZE - sizeof(*trace);
       trace->log_buf_ = trace->data_;       // size is MAX_TRACE_LOG_SIZE
-      trace->flt_serialize_buf_ = trace->data_ + MAX_TRACE_LOG_SIZE; // size is MAX_FLT_SERIALIZE_SIZE
+      trace->show_trace_buf_ = trace->data_ + MAX_TRACE_LOG_SIZE;       // size is MAX_TRACE_LOG_SIZE
+      trace->flt_serialize_buf_ = trace->data_ + (2 * MAX_TRACE_LOG_SIZE); // size is MAX_FLT_SERIALIZE_SIZE
       trace->offset_ = INIT_OFFSET;
       trace->auto_flush_ = 1;
       trace->trace_enable_ = FALSE;
+      trace->show_trace_enable_ = FALSE;
       trace->force_print_ = FALSE;
       trace->slow_query_print_ = FALSE;
       trace->root_span_id_.low_ = 0;
       trace->root_span_id_.high_ = 0;
       trace->flt = flt;
       flt->trace_ = trace;
+      // set the starting parentheses
+      trace->show_trace_buf_[0] = '[';
+      trace->show_trace_buf_offset_ = 1;
+      trace->free_tag_list_.data_ = NULL;
+      trace->free_tag_list_.next_ = NULL;
+      trace->free_tag_list_.tag_type_ = 0;
+      for (index = 0; index < TAG_CACHE_COUNT; ++index) {
+        ObTagCtx *tag = (ObTagCtx *)(trace->data_ + TAG_BUFFER_BEGIN + (index * sizeof(ObTagCtx)));
+        tag->next_ = trace->free_tag_list_.next_;
+        trace->free_tag_list_.next_ = tag;
+      }
       for (index = 0; index < SPAN_CACHE_COUNT; ++index) {
-        char *begin_addr = trace->data_  + MAX_TRACE_LOG_SIZE + MAX_FLT_SERIALIZE_SIZE + (index * (sizeof(LIST) + sizeof(ObSpanCtx)));
+        char *begin_addr = trace->data_ + SPAN_BUFFER_BEGIN + (index * (sizeof(LIST) + sizeof(ObSpanCtx)));
         LIST *list = (LIST *)begin_addr;
         list->data = (ObSpanCtx *)(begin_addr + sizeof(LIST));
         trace->free_span_list_ = list_add(trace->free_span_list_, list);
@@ -1322,11 +1445,18 @@ void begin_trace(ObTrace *trace)
     if (OB_ISNULL(flt)) {
       // error, do not entable trace
       trace->trace_enable_ = FALSE;
+      trace->show_trace_enable_ = FALSE;
     } else if (FALSE == flt_is_vaild(flt)) {
       // error, invalid trace
       trace->trace_enable_ = FALSE;
+      trace->show_trace_enable_ = FALSE;
+    } else if (TRUE == flt->control_info_.flt_show_trace_enable_) {
+      // for show trace , always true
+      trace->trace_enable_ = TRUE;
+      trace->show_trace_enable_ = TRUE;
     } else {
       double trace_pct = flt_get_pct(trace->uuid_random_seed);
+      trace->show_trace_enable_ = FALSE;
 
       if (trace_pct <= flt->control_info_.sample_pct_) {
         // trace enable
@@ -1337,10 +1467,15 @@ void begin_trace(ObTrace *trace)
     }
 
     if (TRUE == trace->trace_enable_) {
+      // todo : add interface to set trace id
       trace->trace_id_ = uuid4_generate(trace->uuid_random_seed);
       trace->level_ = flt->control_info_.level_;
       // If the trace hits, the subsequent calculation and printing strategy
-      if (RP_ALL == flt->control_info_.rp_) {
+
+      if (TRUE == flt->control_info_.flt_show_trace_enable_) {
+        // for show trace , always true
+        trace->force_print_ = TRUE;
+      } else if (RP_ALL == flt->control_info_.rp_) {
         trace->force_print_ = TRUE;
       } else if (RP_SAMPLE_AND_SLOW_QUERY == flt->control_info_.rp_) {
         // Hit print samples need to print
@@ -1380,8 +1515,8 @@ void end_trace(ObTrace *trace)
       if (0 == span->end_ts_) {
         span->end_ts_ = get_current_time_us();
       }
-      trace->current_span_list_ = trace->current_span_list_->next;
       // add all elem to free span list
+      trace->current_span_list_ = list_delete(trace->current_span_list_, span_elem);
       trace->free_span_list_ = list_add(trace->free_span_list_, span_elem);
     }
     trace->offset_ = INIT_OFFSET;
@@ -1454,29 +1589,37 @@ void flush_first_span(ObTrace *trace)
       }
     }
     if (OB_SUCC(ret) && 0 != span->end_ts_) {
+      // clear span and reset tag
+      ObTagCtx *tag = span->tags_;
+      while(OB_NOT_NULL(tag)) {
+        ObTagCtx *free_tag = tag;
+        tag = tag->next_;  
+        reset_tag(trace, span, free_tag);
+      }
+      span->tags_ = NULL;
       trace->current_span_list_ = list_delete(trace->current_span_list_, span_list);
       trace->free_span_list_ = list_add(trace->free_span_list_, span_list);
     }
-    span->tags_ = 0;
   }
 }
 
 void flush_trace(ObTrace *trace)
 {
-  LIST *next;
-  LIST *span_list;
+  LIST *span_elem;
   ObSpanCtx *span;
   int64_t pos = 0;
   int ret = OB_SUCCESS;
+  int log_buf_len = 0;
+  int show_trace_buf_len = 0;
 
   if (OB_ISNULL(trace) || (0 == trace->trace_id_.low_ && 0 == trace->trace_id_.high_)) {
     // do nothing
-  } else if (OB_ISNULL(span_list = trace->current_span_list_)) {
+  } else if (OB_ISNULL(trace->current_span_list_)) {
     // do nothing
   } else {
-    while (OB_NOT_NULL(span_list)) {
-      span = (ObSpanCtx *)span_list->data;
-      next = span_list->next;
+    while (OB_NOT_NULL(trace->current_span_list_) && OB_SUCC(ret)) {
+      span_elem = trace->current_span_list_;
+      span = (ObSpanCtx *)span_elem->data;
       if (OB_NOT_NULL(span)) {
         ObTagCtx *tag = span->tags_;
         my_bool first = TRUE;
@@ -1508,31 +1651,50 @@ void flush_trace(ObTrace *trace)
         }
         if (OB_SUCC(ret)) {
           INIT_SPAN(trace, span->source_span_);
-          ret = snprintf(trace->log_buf_ + trace->log_buf_offset_,
-                    MAX_TRACE_LOG_SIZE - trace->log_buf_offset_,
-                    TRACE_PATTERN "%s}",
-                    UUID_TOSTRING(trace->trace_id_),
-                    "obclient",
-                    UUID_TOSTRING(span->span_id_),
-                    span->start_ts_,
-                    span->end_ts_,
-                    UUID_TOSTRING(OB_ISNULL(span->source_span_) ? trace->root_span_id_ : span->source_span_->span_id_),
-                    span->is_follow_ ? "true" : "false",
-                    buf);
-          if (ret < 0 || trace->log_buf_offset_ + ret >= MAX_TRACE_LOG_SIZE) {
+          log_buf_len = snprintf(trace->log_buf_ + trace->log_buf_offset_,
+                                      MAX_TRACE_LOG_SIZE - trace->log_buf_offset_,
+                                      TRACE_PATTERN "%s}",
+                                      UUID_TOSTRING(trace->trace_id_),
+                                      "obclient",
+                                      UUID_TOSTRING(span->span_id_),
+                                      span->start_ts_,
+                                      span->end_ts_,
+                                      UUID_TOSTRING(OB_ISNULL(span->source_span_) ? trace->root_span_id_ : span->source_span_->span_id_),
+                                      span->is_follow_ ? "true" : "false",
+                                      buf);
+          if (log_buf_len < 0 || trace->log_buf_offset_ + log_buf_len >= MAX_TRACE_LOG_SIZE) {
             ret = OB_ERROR;
           } else {
-            trace->log_buf_offset_ += ret;
-            ret = OB_SUCCESS;
+            trace->log_buf_offset_ += log_buf_len;
+            if (0 != span->end_ts_) {
+              // The span that has ended needs to be put into the show trace buffer and sent to the backend next time
+              show_trace_buf_len = snprintf(trace->show_trace_buf_ + trace->show_trace_buf_offset_,
+                                              MAX_TRACE_LOG_SIZE - trace->show_trace_buf_offset_,
+                                              "%.*s,",
+                                              log_buf_len,
+                                              trace->log_buf_ + trace->log_buf_offset_ - log_buf_len);
+              if (show_trace_buf_len < 0 || trace->show_trace_buf_offset_ + show_trace_buf_len >= MAX_TRACE_LOG_SIZE) {
+                ret = OB_ERROR;
+              } else {
+                trace->show_trace_buf_offset_ += show_trace_buf_len;
+              }
+            }
           }
         }
         if (OB_SUCC(ret) && 0 != span->end_ts_) {
-          trace->current_span_list_ = list_delete(trace->current_span_list_, span_list);
-          trace->free_span_list_ = list_add(trace->free_span_list_, span_list);
+          
+          // clear span and reset tag
+          ObTagCtx *tag = span->tags_;
+          while(OB_NOT_NULL(tag)) {
+            ObTagCtx *free_tag = tag;
+            tag = tag->next_;  
+            reset_tag(trace, span, free_tag);
+          }
+          span->tags_ = 0;
+          trace->current_span_list_ = list_delete(trace->current_span_list_, span_elem);
+          trace->free_span_list_ = list_add(trace->free_span_list_, span_elem);
         }
-        span->tags_ = 0;
       }
-      span_list = next;
     }
     trace->offset_ = INIT_OFFSET;
   }
@@ -1556,7 +1718,6 @@ ObSpanCtx* begin_span(ObTrace *trace, uint32_t span_type, uint8_t level, my_bool
     }
     if (OB_NOT_NULL(trace->free_span_list_)) {
       LIST *span_elem = trace->free_span_list_;
-      trace->free_span_list_ = trace->free_span_list_->next;
       if (OB_NOT_NULL(span_elem)) {
         new_span = (ObSpanCtx *)span_elem->data;
         new_span->span_type_ = span_type;
@@ -1568,6 +1729,7 @@ ObSpanCtx* begin_span(ObTrace *trace, uint32_t span_type, uint8_t level, my_bool
         new_span->end_ts_ = 0;
         new_span->tags_ = NULL;
         trace->last_active_span_ = new_span;
+        trace->free_span_list_ = list_delete(trace->free_span_list_, span_elem);
         trace->current_span_list_ = list_add(trace->current_span_list_, span_elem);
       }
     }
@@ -1619,17 +1781,14 @@ void reset_span(ObTrace *trace)
     // trace is not inited
   } else {
     ObSpanCtx *span;
-    LIST *next;
-    LIST *span_elem = trace->current_span_list_;
-    while(OB_NOT_NULL(span_elem)) {
+    LIST *span_elem;
+    while(OB_NOT_NULL(trace->current_span_list_)) {
+      span_elem = trace->current_span_list_;
       span = (ObSpanCtx *)span_elem->data;
-      next = span_elem->next;
-      if (0 != span->end_ts_) {
-        trace->current_span_list_ = list_delete(trace->current_span_list_, span_elem);
-        trace->free_span_list_ = list_add(trace->free_span_list_, span_elem);
-      }
+      // All spans are recycled after a statement in the transaction ends
+      trace->current_span_list_ = list_delete(trace->current_span_list_, span_elem);
+      trace->free_span_list_ = list_add(trace->free_span_list_, span_elem);
       span->tags_ = NULL;
-      span_elem = next;
     }
   }
 }
@@ -1640,15 +1799,30 @@ void append_tag(ObTrace *trace, ObSpanCtx *span, uint16_t tag_type, const char *
     // do nothing
   } else if (OB_ISNULL(str)) {
     // do nothing
-  } else if (trace->offset_ + sizeof(ObTagCtx) > trace->buffer_size_) {
+  } else if (OB_ISNULL(trace->free_tag_list_.next_)) {
     // do nothing
   } else {
-    ObTagCtx *tag = (ObTagCtx *)(trace->data_ + trace->offset_);
+    // get tag from free tag list
+    ObTagCtx *tag = (ObTagCtx *)(trace->free_tag_list_.next_);
+    trace->free_tag_list_.next_ = tag->next_;
+    // append tag into span
     tag->next_ = span->tags_;
     span->tags_ = tag;
     tag->tag_type_ = tag_type;
     tag->data_ = str;
-    trace->offset_ += sizeof(ObTagCtx);
+  }
+}
+
+void reset_tag(ObTrace *trace, ObSpanCtx *span, ObTagCtx *tag)
+{
+  UNUSED(span);
+  if (OB_ISNULL(trace)) {
+    // do nothing
+  } else if (OB_ISNULL(tag)) {
+    // do nothing
+  } else {
+    tag->next_ = trace->free_tag_list_.next_;
+    trace->free_tag_list_.next_ = tag;
   }
 }
 

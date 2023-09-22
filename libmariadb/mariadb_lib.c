@@ -181,7 +181,7 @@ my_bool get_local_ip_port(my_socket fd, char *ip, int iplen, int *port)
 static void mysql_close_memory(MYSQL *mysql);
 void read_user_name(char *name);
 my_bool STDCALL mariadb_reconnect(MYSQL *mysql);
-static int cli_report_progress(MYSQL *mysql, uchar *packet, uint length);
+// static int cli_report_progress(MYSQL *mysql, uchar *packet, uint length);
 
 extern int mysql_client_plugin_init();
 extern void mysql_client_plugin_deinit();
@@ -288,7 +288,7 @@ ma_net_safe_read(MYSQL *mysql)
   NET *net= &mysql->net;
   ulong len=0;
 
-restart:
+// restart:
   if (net->pvio != 0)
     len=ma_net_read(net);
 
@@ -310,18 +310,18 @@ restart:
       pos+=2;
       len-=2;
 
-      if (last_errno== 65535 &&
-          ((mariadb_connection(mysql) && (mysql->server_capabilities & CLIENT_PROGRESS)) ||
-           (!(mysql->extension->mariadb_server_capabilities & MARIADB_CLIENT_PROGRESS << 32))))
-      {
-        if (cli_report_progress(mysql, (uchar *)pos, (uint) (len-1)))
-        {
-          /* Wrong packet */
-          my_set_error(mysql, CR_MALFORMED_PACKET, SQLSTATE_UNKNOWN, 0);
-          return (packet_error);
-        }
-        goto restart;
-      }
+      // if (last_errno== 65535 &&
+      //     ((mariadb_connection(mysql) && (mysql->server_capabilities & CLIENT_PROGRESS)) ||
+      //      (!(mysql->extension->mariadb_server_capabilities & MARIADB_CLIENT_PROGRESS << 32))))
+      // {
+      //   if (cli_report_progress(mysql, (uchar *)pos, (uint) (len-1)))
+      //   {
+      //     /* Wrong packet */
+      //     my_set_error(mysql, CR_MALFORMED_PACKET, SQLSTATE_UNKNOWN, 0);
+      //     return (packet_error);
+      //   }
+      //   goto restart;
+      // }
       net->last_errno= last_errno;
       if (pos[0]== '#')
       {
@@ -354,31 +354,31 @@ restart:
     0  ok
     1  error
 */
-static int cli_report_progress(MYSQL *mysql, uchar *packet, uint length)
-{
-  uint stage, max_stage, proc_length;
-  double progress;
-  uchar *start= packet;
+// static int cli_report_progress(MYSQL *mysql, uchar *packet, uint length)
+// {
+//   uint stage, max_stage, proc_length;
+//   double progress;
+//   uchar *start= packet;
 
-  if (length < 5)
-    return 1;                         /* Wrong packet */
+//   if (length < 5)
+//     return 1;                         /* Wrong packet */
 
-  if (!(mysql->options.extension && mysql->options.extension->report_progress))
-    return 0;                         /* No callback, ignore packet */
+//   if (!(mysql->options.extension && mysql->options.extension->report_progress))
+//     return 0;                         /* No callback, ignore packet */
 
-  packet++;                           /* Ignore number of strings */
-  stage= (uint) *packet++;
-  max_stage= (uint) *packet++;
-  progress= uint3korr(packet)/1000.0;
-  packet+= 3;
-  proc_length= net_field_length(&packet);
-  if (packet + proc_length > start + length)
-    return 1;                         /* Wrong packet */
-  (*mysql->options.extension->report_progress)(mysql, stage, max_stage,
-                                               progress, (char*) packet,
-                                               proc_length);
-  return 0;
-}
+//   packet++;                           /* Ignore number of strings */
+//   stage= (uint) *packet++;
+//   max_stage= (uint) *packet++;
+//   progress= uint3korr(packet)/1000.0;
+//   packet+= 3;
+//   proc_length= net_field_length(&packet);
+//   if (packet + proc_length > start + length)
+//     return 1;                         /* Wrong packet */
+//   (*mysql->options.extension->report_progress)(mysql, stage, max_stage,
+//                                                progress, (char*) packet,
+//                                                proc_length);
+//   return 0;
+// }
 
 /* Get the length of next field. Change parameter to point at fieldstart */
 ulong
@@ -1022,7 +1022,8 @@ unpack_fields(const MYSQL *mysql,
       if (0 == len) {
         field->owner_name = NULL;
       } else {
-        field->owner_name = (unsigned char *)ma_memdup_root(alloc, (char*)complex_type, len);
+        field->owner_name = (unsigned char *)ma_memdup_root(alloc, (char*)complex_type, len+1);
+        field->owner_name[len] = 0;
         complex_type += len;
       }
 
@@ -1031,7 +1032,8 @@ unpack_fields(const MYSQL *mysql,
       if (0 == len) {
         field->type_name = NULL;
       } else {
-        field->type_name = (unsigned char *)ma_memdup_root(alloc, (char*)complex_type, len);
+        field->type_name = (unsigned char *)ma_memdup_root(alloc, (char*)complex_type, len+1);
+        field->type_name[len] = 0;
         complex_type += len;
       }
 
@@ -1834,7 +1836,7 @@ int mthd_my_read_one_row(MYSQL *mysql,uint fields,MYSQL_ROW row, ulong *lengths)
     if (NULL == mysql_fields) {
       return 1;
     }
-
+    
     for (field=0 ; field < fields ; field++) {
       if ((len=(ulong) net_field_length(&cp)) == NULL_LENGTH) {
         continue;
@@ -1947,7 +1949,7 @@ int mthd_my_read_one_row(MYSQL *mysql,uint fields,MYSQL_ROW row, ulong *lengths)
         if (mysql_fields[field].max_length < len)
           mysql_fields[field].max_length=len;
       }
-    }
+    }  
   } else {
     for (field=0 ; field < fields ; field++)
     {
@@ -2114,15 +2116,23 @@ char *ma_send_connect_attr(MYSQL *mysql, unsigned char *buffer)
 static my_bool
 ma_set_ob_connect_attrs(MYSQL *mysql)
 {
+#define OB_MAX_UINT64_BUF_LEN 128
   int rc = 0;
   uint64_t cap = OBPROXY_DEFAULT_CAPABILITY_FLAG;
-  char cap_buf[OB_MAX_UINT64_BUF_LEN];
+  char cap_buf[OB_MAX_UINT64_BUF_LEN] = {0};
+  uint64_t caplob = 0;
+  char caplob_buf[OB_MAX_UINT64_BUF_LEN] = {0};
 
   if (mysql->can_use_protocol_ob20) {
     cap |= OBCLIENT_CAP_OB_PROTOCOL_V2;
     cap |= OBCLIENT_CAP_PROXY_NEW_EXTRA_INFO;
     if (mysql->can_use_full_link_trace) {
       cap |= OBCLIENT_CAP_FULL_LINK_TRACE;
+      if (mysql->can_use_flt_show_trace) {
+        cap |= OBCLIENT_CAP_PROXY_FULL_LINK_TRACE_SHOW_TRACE;
+      } else {
+        cap &= ~OBCLIENT_CAP_PROXY_FULL_LINK_TRACE_SHOW_TRACE;
+      }
     } else {
       cap &= ~OBCLIENT_CAP_FULL_LINK_TRACE;
     }
@@ -2130,6 +2140,7 @@ ma_set_ob_connect_attrs(MYSQL *mysql)
     cap &= ~OBCLIENT_CAP_OB_PROTOCOL_V2;
     cap &= ~OBCLIENT_CAP_FULL_LINK_TRACE;
     cap &= ~OBCLIENT_CAP_PROXY_NEW_EXTRA_INFO;
+    cap &= ~OBCLIENT_CAP_PROXY_FULL_LINK_TRACE_SHOW_TRACE;
   }
   
   snprintf(cap_buf, OB_MAX_UINT64_BUF_LEN, "%lu", cap);
@@ -2137,6 +2148,11 @@ ma_set_ob_connect_attrs(MYSQL *mysql)
   rc += mysql_optionsv(mysql, MYSQL_OPT_CONNECT_ATTR_ADD, OB_MYSQL_CAPABILITY_FLAG, cap_buf);
   rc += mysql_optionsv(mysql, MYSQL_OPT_CONNECT_ATTR_ADD, OB_MYSQL_CLIENT_MODE, "__ob_libobclient");
 
+  if (mysql->can_use_ob_client_lob_locatorv2) {
+    caplob |= OBCLIENT_CAP_OB_LOB_LOCATOR_V2;
+    snprintf(caplob_buf, OB_MAX_UINT64_BUF_LEN, "%lu", caplob);
+    rc += mysql_optionsv(mysql, MYSQL_OPT_CONNECT_ATTR_ADD, OB_MYSQL_LOB_LOCATOR_V2, caplob_buf);
+  }
   return rc;
 }
 
@@ -2670,6 +2686,8 @@ MYSQL *mthd_my_real_connect(MYSQL *mysql, const char *host, const char *user,
   // check env variable to determine if use ob20
   determine_protocol_ob20(mysql);
   determine_full_link_trace(mysql);
+  determine_ob_client_lob_locatorv2(mysql);
+  determine_flt_show_trace(mysql);
 
   if (run_plugin_auth(mysql, scramble_data, scramble_len,
                              scramble_plugin, db))
@@ -2706,8 +2724,14 @@ MYSQL *mthd_my_real_connect(MYSQL *mysql, const char *host, const char *user,
   }
   if (get_ob_server_version(mysql)) {
     // select version errro
-    goto error;
+    // goto error;
   }
+
+  if (!set_nls_format(mysql)) {
+    // goto error;
+    // do nothing
+  }
+
   determine_use_prepare_execute(mysql);
   determine_send_plarray_maxrarr_len(mysql);
   determine_plarray_bindbyname(mysql);

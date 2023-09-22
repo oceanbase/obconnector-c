@@ -408,10 +408,13 @@ struct st_mysql_options {
     my_bool       can_plarray_bindbyname;
     my_bool       can_use_protocol_ob20;
     my_bool       can_use_full_link_trace;
+    my_bool       can_use_ob_client_lob_locatorv2;
+    my_bool       can_use_flt_show_trace;
     unsigned long ob_server_version;
     unsigned long ob_proxy_version;
     unsigned long capability; // system varaiable
 } MYSQL;
+
 /**
  * @brief 
  *  For mysql_use_result, an additional buffer is needed to store rows.
@@ -424,7 +427,7 @@ struct st_mysql_options {
 typedef struct st_ob_result_extension {
   ulong pkt_len;
   char *pkt_buffer;
-  MYSQL_FIELD *mysql_fields;
+  MYSQL_FIELD *mysql_fields;   // ±£¥Êfield–≈œ¢
 } OB_RES_EXT;
 
 struct st_mysql_trace_info;
@@ -522,6 +525,33 @@ typedef struct st_oracle_time
   int offset_hour, offset_minute;
   char *tz_name, *tz_abbr;
 } ORACLE_TIME;
+
+typedef struct st_ym_object
+{
+  int ym_year;
+  int ym_month;
+  int ym_scale;
+}YM_OBJECT;
+typedef struct st_ds_object
+{
+  int ds_day;
+  int ds_hour;
+  int ds_minute;
+  int ds_second;
+  int ds_frac_second;
+  int ds_day_scale;
+  int ds_frac_second_scale;
+}DS_OBJECT;
+typedef struct st_oracle_interval
+{
+  unsigned short mysql_type;
+  char data_symbol; //1:+, -1:- 0, default
+  union {
+    struct st_ym_object ym_object;
+    struct st_ds_object ds_object;
+  } data_object;
+}ORACLE_INTERVAL;
+
 #define AUTO_SEC_PART_DIGITS 39
 #endif
 

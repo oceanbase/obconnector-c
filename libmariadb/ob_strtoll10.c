@@ -32,7 +32,22 @@
 longlong strtoll10(const char *nptr, char **endptr, int *error)
 {
   longlong ret = 0;
+  char *tmp_endptr = NULL;
+  char tmp_endptr_value;
+  if (NULL != endptr && NULL != *endptr) {
+    tmp_endptr = *endptr;
+    tmp_endptr_value = **endptr;
+    *tmp_endptr = '\0';
+  }
+  /*
+  * Obclient 2.2.2 changes, obclient 1.x uses my_strtoll10, 2.x uses lib c to provide strtoll after rectification, 
+  * the two perform differently on endptr, my_strtoll10 will detect endptr and not convert the bit result, 
+  * so set 0 here, Compatible with obclient 1.x
+  */
   ret = strtoll(nptr, endptr, 10);
   *error = errno;
+  if (NULL != tmp_endptr) {
+    *tmp_endptr = tmp_endptr_value;
+  }
   return ret;
 }
