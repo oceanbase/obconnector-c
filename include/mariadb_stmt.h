@@ -219,6 +219,65 @@ typedef struct ObLobLocator
   char data_[1]; // rowid + varchar
 } OB_LOB_LOCATOR;
 
+
+typedef struct st_ObClientMemLobCommon
+{
+  uint32_t magic_; // Keep the old version consistent
+  uint32_t version_ : 8;
+  uint32_t type_ : 4;     // Persistent/TmpFull/TmpDelta
+  uint32_t read_only_ : 1; // Whether to write
+  uint32_t is_inrow_ : 1;
+  uint32_t is_open_ : 1; // only persist lob could be open
+  uint32_t is_simple : 1; 
+  uint32_t has_extern : 1;
+  uint32_t reserved_ : 15;
+}ObClientMemLobCommon;
+typedef struct st_ObClientMemLobExternHeader
+{
+  int64_t snapshot_ver_;
+  uint64_t table_id_;
+  uint32_t column_idx_;
+  uint16_t has_tx_info : 1;
+  uint16_t has_cid_hash : 1; 
+  uint16_t has_view_info : 1; 
+  uint16_t extern_flags_ : 13;
+  uint16_t rowkey_size_; 
+  uint32_t payload_offset_;
+  uint32_t payload_size_;
+}ObClientMemLobExternHeader;
+typedef struct st_ObClientLobCommon
+{
+  uint32_t version_ : 8;
+  uint32_t is_init_ : 1;
+  uint32_t is_empty_ : 1;
+  uint32_t in_row_ : 1;
+  uint32_t opt_encrypt_ : 1;
+  uint32_t opt_compress_ : 1;
+  uint32_t opt_deduplicate_ : 1;
+  uint32_t has_content_type_ : 1;
+  uint32_t use_big_endian_ : 1;
+  uint32_t is_mem_loc_ : 1;
+  uint32_t reserve_ : 15;
+}ObClientLobCommon;
+typedef struct st_ObClientLobData
+{
+  uint64_t tablet_id_;
+  uint64_t lob_id_;
+  uint64_t byte_size_;
+}ObClientLobData;
+typedef struct ObLobLocatorV2
+{
+  ObClientMemLobCommon common;
+  ObClientMemLobExternHeader extern_header;
+  char data_[1];
+}OB_LOB_LOCATOR_V2;
+uint8_t get_ob_lob_locator_version(void *lob);
+int64_t get_ob_lob_payload_data_len(void *lob);
+int stmt_get_data_from_lobv2(MYSQL *mysql, void * lob, enum_field_types dty, 
+  int64_t char_offset, int64_t byte_offset, int64_t char_len, int64_t byte_len, char *buf, const int64_t buf_len, int64_t *data_len, int64_t *act_len);
+
+
+
 typedef struct st_mysqlnd_upsert_result
 {
   unsigned int  warning_count;
@@ -374,7 +433,7 @@ enum enum_ob20_protocol
   PROTOCOL_OB20_FORCE_CLOSE = 0,
   PROTOCOL_OB20_AUTO_OPEN,
   PROTOCOL_OB20_FORCE_OPEN,
-  PROTOCOL_OB20_FLAY_MAX
+  PROTOCOL_OB20_FLAG_MAX
 };
 my_bool determine_protocol_ob20(MYSQL *mysql);
 my_bool get_use_protocol_ob20(MYSQL *mysql);
@@ -384,14 +443,36 @@ enum enum_full_link_trace
   PROTOCOL_FLT_FORCE_CLOSE = 0,
   PROTOCOL_FLT_AUTO_OPEN,
   PROTOCOL_FLT_FORCE_OPEN,
-  PROTOCOL_FLT_FLAY_MAX
+  PROTOCOL_FLT_FLAG_MAX
 };
 my_bool determine_full_link_trace(MYSQL *mysql);
 my_bool get_use_full_link_trace(MYSQL *mysql);
 
+enum enum_flt_show_trace
+{
+  FLT_SHOW_TRACE_FORCE_CLOSE = 0,
+  FLT_SHOW_TRACE_AUTO_OPEN,
+  FLT_SHOW_TRACE_FORCE_OPEN,
+  FLT_SHOW_TRACE_FLAG_MAX
+};
+my_bool determine_flt_show_trace(MYSQL *mysql);
+my_bool get_use_flt_show_trace(MYSQL *mysql);
+
 uint32_t ob_crc32(uint64_t crc, const char *buf, int64_t len);
 uint64_t ob_crc64(uint64_t crc, const char *buf, int64_t len);
 /*end for support protocol ob20*/
+
+enum enum_ob_client_lob_locatorv2
+{
+  OB_CLIENT_LOB_LOCATORV2_FORCE_CLOSE = 0,
+  OB_CLIENT_LOB_LOCATORV2_AUTO_OPEN,
+  OB_CLIENT_LOB_LOCATORV2_FORCE_OPEN,
+  OB_CLIENT_LOB_LOCATORV2_FLAY_MAX
+};
+my_bool determine_ob_client_lob_locatorv2(MYSQL *mysql);
+my_bool get_use_ob_client_lob_locatorv2(MYSQL *mysql);
+
+my_bool set_nls_format(MYSQL *mysql);
 
 /* add for support bindbyname for plarray */
 struct prepare_extend_args_t

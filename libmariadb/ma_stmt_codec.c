@@ -94,6 +94,11 @@ my_bool mysql_ps_subsystem_initialized= 0;
   ((((val) > (max_range)) || ((val) < (min_range)) ? 1 : 0))
 
 
+extern ulong calculate_interval_length(uchar *cp, enum_field_types type);
+extern int rewrite_interval(uchar *cp, char *to, const uint to_size, ulong *convert_len, enum_field_types type);
+extern ulong calculate_new_time_length_with_nls(MYSQL *mysql, uchar *cp, ulong len, enum_field_types type);
+extern ulong rewrite_new_time_with_nls(MYSQL *mysql, uchar *cp, ulong len, char *to, int64_t buf_len, enum_field_types type);
+
 void ma_bmove_upp(register char *dst, register const char *src, register size_t len)
 {
   while (len-- != 0) *--dst = *--src;
@@ -881,13 +886,26 @@ static void convert_from_float(MYSQL_BIND *r_param, const MYSQL_FIELD *field, fl
 
       length= MIN(MAX_DOUBLE_STRING_REP_LENGTH - 1, r_param->buffer_length);
 
-      if (field->decimals >= NOT_FIXED_DEC)
-      {
-        length= ma_gcvt(val, MY_GCVT_ARG_FLOAT, (int)length, buff, NULL);
-      }
-      else
-      {
-        length= ma_fcvt(val, field->decimals, buff, NULL);
+      if (isnan(val)) {
+        snprintf(buff, length, "%s", "Nan");
+        length = 3;
+      } else if (isinf(val)) {
+        if (val > 0) {
+          snprintf(buff, length, "%s", "Inf");
+          length = 3;
+        } else {
+          snprintf(buff, length, "%s", "-Inf");
+          length = 4;
+        }
+      } else {
+        if (field->decimals >= NOT_FIXED_DEC)
+        {
+          length = ma_gcvt(val, MY_GCVT_ARG_FLOAT, (int)length, buff, NULL);
+        }
+        else
+        {
+          length = ma_fcvt(val, field->decimals, buff, NULL);
+        }
       }
 
       /* check if ZEROFILL flag is active */
@@ -982,13 +1000,26 @@ static void convert_from_double(MYSQL_BIND *r_param, const MYSQL_FIELD *field, d
 
      length= MIN(MAX_DOUBLE_STRING_REP_LENGTH - 1, r_param->buffer_length);
 
-     if (field->decimals >= NOT_FIXED_DEC)
-     {
-       length= ma_gcvt(val, MY_GCVT_ARG_DOUBLE, (int)length, buff, NULL);
-     }
-     else
-     {
-       length= ma_fcvt(val, field->decimals, buff, NULL);
+     if (isnan(val)) {
+       snprintf(buff, length, "%s", "Nan");
+       length = 3;
+     } else if (isinf(val)) {
+       if (val > 0) {
+         snprintf(buff, length, "%s", "Inf");
+         length = 3;
+       } else {
+         snprintf(buff, length, "%s", "-Inf");
+         length = 4;
+       }
+     } else {
+       if (field->decimals >= NOT_FIXED_DEC)
+       {
+         length = ma_gcvt(val, MY_GCVT_ARG_DOUBLE, (int)length, buff, NULL);
+       }
+       else
+       {
+         length = ma_fcvt(val, field->decimals, buff, NULL);
+       }
      }
 
      /* check if ZEROFILL flag is active */
@@ -1122,68 +1153,192 @@ void ps_fetch_oracle_timestamp(MYSQL_BIND *param,
   uint buffer_length = 0;
   uint length = net_field_length(row);
 
+  switch (param->buffer_type) {
+  case MYSQL_TYPE_OB_TIMESTAMP_NANO:
+  case MYSQL_TYPE_OB_TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+  case MYSQL_TYPE_OB_TIMESTAMP_WITH_TIME_ZONE: {
+    if (length > 16) {
+      buffer_length = length - 16 + sizeof(ORACLE_TIME) + 2;
+    } else {
+      buffer_length = sizeof(ORACLE_TIME);
+    }
+
+    if (param->buffer_length < buffer_length) {
+      *param->length = buffer_length;
+      *param->error = 1;
+      *row += length;
+    } else {
+      ORACLE_TIME *tm = (ORACLE_TIME *)param->buffer;
+      uint tz_length = 0;
+      uint buffer_offset = 0;
+      uchar *to = *row;
+
+      memset(tm, 0, sizeof(ORACLE_TIME));
+      tm->century = (int)(*(char*)to++);
+      tm->year = (int)(*(char*)to++);
+      tm->month = (uint)(*to++);
+      tm->day = (uint)(*to++);
+      tm->hour = (uint)(*to++);
+      tm->minute = (uint)(*to++);
+      tm->second = (uint)(*to++);
+
+      tm->second_part = (ulong)sint4korr(to);
+      to += 4;
+      tm->scale = (uint)(*to++);
+
+      buffer_length = buffer_offset = sizeof(ORACLE_TIME);
+      if (length > 12) {
+        tm->offset_hour = (int)(*(char*)to++);
+        tm->offset_minute = (int)(*(char*)to++);
+
+        tz_length = (uint)(*to++);
+        buffer_length += (tz_length + 1);
+        if (tz_length > 0 && buffer_offset + tz_length + 1 < param->buffer_length) {
+          memcpy((char*)param->buffer + buffer_offset, to, tz_length);
+          tm->tz_name = (char*)param->buffer + buffer_offset;
+          buffer_offset += tz_length;
+          *((char*)param->buffer + buffer_offset) = '\0';
+          buffer_offset++;
+        }
+        to += tz_length;
+
+        tz_length = (uint)(*to++);
+        buffer_length += (tz_length + 1);
+        if (tz_length > 0 && buffer_offset + tz_length + 1 < param->buffer_length) {
+          memcpy((char*)param->buffer + buffer_offset, to, tz_length);
+          tm->tz_abbr = (char*)param->buffer + buffer_offset;
+          buffer_offset += tz_length;
+          *((char*)param->buffer + buffer_offset) = '\0';
+          buffer_offset++;
+        }
+        to += tz_length;
+      }
+      *param->length = buffer_length;
+      *param->error = param->buffer_length < buffer_length;
+      *row = to;
+    }
+    break;
+  }
+  case MYSQL_TYPE_VAR_STRING:
+  case MYSQL_TYPE_STRING:{
+    uchar *buffer = *row;
+    ulong convert_len = calculate_new_time_length_with_nls(param->mysql, buffer, length, field->type);
+    *param->length = convert_len;
+    if (param->buffer_length < convert_len) {
+      *param->error = 1;
+    } else {
+      convert_len = rewrite_new_time_with_nls(param->mysql, buffer, length, param->buffer, (uint)(param->buffer_length), field->type);
+      *param->length = convert_len;
+    }
+    *row += length;
+    break;
+  }
+  default: {
+    convert_froma_string(param, (char *)*row, length);
+    *row += length;
+    break;
+  }
+  }
+}
+
+static
+void ps_fetch_oracle_interval(MYSQL_BIND *param, const MYSQL_FIELD *field, uchar **row)
+{
+  uint length = net_field_length(row);
+  uchar * buffer = *row;
+
+  switch (param->buffer_type)
+  {
+  case MYSQL_TYPE_OB_INTERVAL_DS: {
+    *param->length = sizeof(ORACLE_INTERVAL);
+    if (length != 14) {
+      *param->error = 1;
+    } else {
+      ORACLE_INTERVAL * interval = (ORACLE_INTERVAL*)param->buffer;
+      interval->mysql_type = MYSQL_TYPE_OB_INTERVAL_DS;
+      interval->data_symbol = (buffer[0] > 0 ? -1 : 1);
+      interval->data_object.ds_object.ds_day = sint4korr(buffer + 1);
+      interval->data_object.ds_object.ds_hour = buffer[5];
+      interval->data_object.ds_object.ds_minute = buffer[6];
+      interval->data_object.ds_object.ds_second = buffer[7];
+      interval->data_object.ds_object.ds_frac_second = sint4korr(buffer + 8);
+      interval->data_object.ds_object.ds_day_scale = buffer[12];
+      interval->data_object.ds_object.ds_frac_second_scale = buffer[13];
+    }
+    break;
+  }
+  case MYSQL_TYPE_OB_INTERVAL_YM: {
+    *param->length = sizeof(ORACLE_INTERVAL);
+    if (length != 7) {
+      *param->error = 1;
+    } else {
+      ORACLE_INTERVAL * interval = (ORACLE_INTERVAL*)param->buffer;
+      interval->mysql_type = MYSQL_TYPE_OB_INTERVAL_YM;
+      interval->data_symbol = (buffer[0] > 0 ? -1 : 1);
+      interval->data_object.ym_object.ym_year = sint4korr(buffer + 1);
+      interval->data_object.ym_object.ym_month = buffer[5];
+      interval->data_object.ym_object.ym_scale = buffer[6];
+    }
+    break;
+  }
+  case MYSQL_TYPE_VAR_STRING:
+  case MYSQL_TYPE_STRING: {
+    ulong convert_len = calculate_interval_length(buffer, field->type);
+    *param->length = convert_len;
+    if ((length != 7 && length != 14) || param->buffer_length < convert_len) {
+      *param->error = 1;
+    } else {
+      if (!rewrite_interval(buffer, param->buffer, (uint)(param->buffer_length), &convert_len, field->type)) {
+        *param->error = 1;
+      }
+      *param->length = convert_len;
+    }
+    break;
+  }
+  default: {
+    convert_froma_string(param, (char *)*row, length);
+    break;
+  }
+  }
+
+  *row += length;
+}
+
+static
+void ps_fetch_oracle_raw(MYSQL_BIND *param, const MYSQL_FIELD *field, uchar **row)
+{
+  ulong length = net_field_length(row);
+  uchar * buffer = *row;
   UNUSED(field);
 
-  if (length > 16) {
-    buffer_length = length - 16 + sizeof(ORACLE_TIME) + 2;
-  } else {
-    buffer_length = sizeof(ORACLE_TIME);
+  switch (param->buffer_type)
+  {
+  case MYSQL_TYPE_OB_RAW: {
+    convert_froma_string(param, (char *)*row, length);
+    break;
   }
-
-  if (param->buffer_length < buffer_length) {
-    *param->length= buffer_length;
-    *param->error= 1;
-    *row += length;
-  } else {
-    ORACLE_TIME *tm= (ORACLE_TIME *)param->buffer;
-    uint tz_length = 0;
-    uint buffer_offset = 0;
-    uchar *to= *row;
-
-    memset(tm, 0, sizeof(ORACLE_TIME));
-    tm->century= (int) (*(char*)to++);
-    tm->year=   (int) (*(char*)to++);
-    tm->month=  (uint) (*to++);
-    tm->day=    (uint) (*to++);
-    tm->hour=   (uint) (*to++);
-    tm->minute= (uint) (*to++);
-    tm->second= (uint) (*to++);
-
-    tm->second_part= (ulong) sint4korr(to);
-    to += 4;
-    tm->scale = (uint) (*to++);
-
-    buffer_length = buffer_offset = sizeof(ORACLE_TIME);
-    if (length > 12) {
-      tm->offset_hour = (int) (*(char*)to++);
-      tm->offset_minute = (int) (*(char*)to++);
-
-      tz_length = (uint) (*to++);
-      buffer_length += (tz_length + 1);
-      if (tz_length > 0 && buffer_offset + tz_length + 1 < param->buffer_length) {
-        memcpy((char*)param->buffer + buffer_offset, to, tz_length);
-        tm->tz_name = (char*)param->buffer + buffer_offset;
-        buffer_offset += tz_length;
-        *((char*)param->buffer + buffer_offset) = '\0';
-        buffer_offset++;
+  case MYSQL_TYPE_VAR_STRING:
+  case MYSQL_TYPE_STRING:{
+    uchar *to = param->buffer;
+    uchar *cp = buffer;
+    uchar *end = buffer + length;
+    if (param->buffer_length < length * 2) {
+      *param->error = 1;
+    } else {
+      for (; cp < end; cp++, to += 2) {
+        sprintf((char *)to, "%02X", *((uchar*)cp));
       }
-      to += tz_length;
-
-      tz_length = (uint) (*to++);
-      buffer_length += (tz_length + 1);
-      if (tz_length > 0 && buffer_offset + tz_length + 1 < param->buffer_length) {
-        memcpy((char*)param->buffer + buffer_offset, to, tz_length);
-        tm->tz_abbr = (char*)param->buffer + buffer_offset;
-        buffer_offset += tz_length;
-        *((char*)param->buffer + buffer_offset) = '\0';
-        buffer_offset++;
-      }
-      to += tz_length;
+      (*to++) = 0;
     }
-    *param->length= buffer_length;
-    *param->error= param->buffer_length < buffer_length;
-    *row = to;
+    *param->length = length * 2;
+    break;
   }
+  default: {
+    convert_froma_string(param, (char *)*row, length);
+    break;
+  }
+  }
+  *row += length;
 }
 
 
@@ -1277,22 +1432,92 @@ static void fill_ob_lob_locator(OB_LOB_LOCATOR *ob_lob_locator, uchar *row)
   ob_lob_locator->payload_size_ = uint4korr(row + 36);
 }
 
+
+static void fill_ob_client_mem_lob_common(ObClientMemLobCommon* common, uchar *row)
+{
+#define BIT1 0x01
+#define BIT4 0x0F
+#define BIT8 0xFF
+#define BIT15 0x7FFF
+  uint32_t tmps = 0;
+  common->magic_ = uint4korr(row);
+  tmps = uint4korr(row + 4);
+  common->version_ = tmps & BIT8;
+  tmps >>= 8;
+  common->type_ = tmps & BIT4;
+  tmps >>= 4;
+  common->read_only_ = tmps & BIT1;
+  tmps >>= 1;
+  common->is_inrow_ = tmps & BIT1;
+  tmps >>= 1;
+  common->is_open_ = tmps & BIT1;
+  tmps >>= 1;
+  common->is_simple = tmps & BIT1;
+  tmps >>= 1;
+  common->has_extern = tmps & BIT1;
+  tmps >>= 1;
+  common->reserved_ = tmps & BIT15;
+}
+static void fill_ob_client_mem_lob_extern_header(ObClientMemLobExternHeader* header, uchar *row)
+{
+#define BIT1 0x01
+#define BIT13 0x1FFF
+  uint16_t tmps = 0;
+  header->snapshot_ver_ = sint8korr(row);
+  header->table_id_ = uint8korr(row+8);
+  header->column_idx_ = uint4korr(row+16);
+
+  tmps = uint2korr(row + 20);
+  header->has_tx_info = tmps & BIT1;
+  tmps >>= 1;
+  header->has_cid_hash = tmps & BIT1;
+  tmps >>= 1;
+  header->has_view_info = tmps & BIT1;
+  tmps >>= 1;
+  header->extern_flags_ = tmps & BIT13;
+
+  header->rowkey_size_ = uint2korr(row + 22);
+  header->payload_offset_ = uint4korr(row + 24);
+  header->payload_size_ = uint4korr(row + 28);
+}
+static void fill_ob_lob_locator_v2(OB_LOB_LOCATOR_V2 *ob_lob_locator, uchar *row)
+{
+  fill_ob_client_mem_lob_common(&ob_lob_locator->common, row);
+  if (ob_lob_locator->common.has_extern){
+    fill_ob_client_mem_lob_extern_header(&ob_lob_locator->extern_header, row+sizeof(ObClientMemLobCommon));
+  }
+}
+
 static void fetch_result_ob_lob(MYSQL_BIND *param,
                                 const MYSQL_FIELD *field __attribute__((unused)),
                                 uchar **row)
 {
   ulong length= net_field_length(row);
+  ulong copy_length = 0;
 
   if (param->buffer_length <= 0
       || param->buffer_length < MAX_OB_LOB_LOCATOR_HEADER_LENGTH
       || length < MAX_OB_LOB_LOCATOR_HEADER_LENGTH) {
     *param->error= 1;
   } else {
-    OB_LOB_LOCATOR *ob_lob_locator = (OB_LOB_LOCATOR *)param->buffer;
-    ulong copy_length = MIN(param->buffer_length - MAX_OB_LOB_LOCATOR_HEADER_LENGTH, length - MAX_OB_LOB_LOCATOR_HEADER_LENGTH);
-    fill_ob_lob_locator(ob_lob_locator, *row);
-    memcpy(ob_lob_locator->data_, (*row) + MAX_OB_LOB_LOCATOR_HEADER_LENGTH, copy_length);
-    *param->error= copy_length + MAX_OB_LOB_LOCATOR_HEADER_LENGTH < length;
+    ObClientMemLobCommon common;
+    fill_ob_client_mem_lob_common(&common, *row);
+    if (common.version_ == OBCLIENT_LOB_LOCATORV1) {
+      OB_LOB_LOCATOR *ob_lob_locator = (OB_LOB_LOCATOR *)param->buffer;
+      fill_ob_lob_locator(ob_lob_locator, *row);
+
+      copy_length = MIN(param->buffer_length - MAX_OB_LOB_LOCATOR_HEADER_LENGTH, length - MAX_OB_LOB_LOCATOR_HEADER_LENGTH);
+      memcpy(ob_lob_locator->data_, (*row) + MAX_OB_LOB_LOCATOR_HEADER_LENGTH, copy_length);
+      *param->error= copy_length + MAX_OB_LOB_LOCATOR_HEADER_LENGTH < length;
+    } else if (common.version_ == OBCLIENT_LOB_LOCATORV2) {
+      OB_LOB_LOCATOR_V2 *ob_lob_locatorv2 = (OB_LOB_LOCATOR_V2 *)param->buffer;
+      //for oracle mode, common.has_extern = 1
+      fill_ob_lob_locator_v2(ob_lob_locatorv2, *row);
+      
+      copy_length = MIN(param->buffer_length - MAX_OB_LOB_LOCATOR_HEADER_LENGTH, length - MAX_OB_LOB_LOCATOR_HEADER_LENGTH);
+      memcpy(ob_lob_locatorv2->data_, (*row) + MAX_OB_LOB_LOCATOR_HEADER_LENGTH, copy_length);
+      *param->error = copy_length + MAX_OB_LOB_LOCATOR_HEADER_LENGTH < length;
+    }
   }
 
   *param->length= length;
@@ -2006,6 +2231,32 @@ void ps_fetch_bin(MYSQL_BIND *r_param,
 }
 /* }}} */
 
+static
+void ps_fetch_mysql_lob(MYSQL_BIND *r_param, const MYSQL_FIELD *field, unsigned char **row)
+{
+  ulong length = net_field_length(row);
+  if (field->charsetnr == 63)
+  {
+    ulong field_length = *r_param->length = length;
+    uchar *current_pos = (*row) + r_param->offset, *end = (*row) + field_length;
+    size_t copylen = 0;
+    if (current_pos < end)
+    {
+      copylen = end - current_pos;
+      if (r_param->buffer_length)
+        memcpy(r_param->buffer, current_pos, MIN(copylen, r_param->buffer_length));
+    }
+    if (copylen < r_param->buffer_length &&
+      (r_param->buffer_type == MYSQL_TYPE_STRING ||
+        r_param->buffer_type == MYSQL_TYPE_JSON))
+        ((char *)r_param->buffer)[copylen] = 0;
+    *r_param->error = copylen > r_param->buffer_length;
+  } else {
+    convert_froma_string(r_param, (char *)*row, length);
+  }
+  (*row) += length;
+}
+
 /* {{{ ps_fetch_result_skip_direct */
 static
 void ps_fetch_result_skip_direct(MYSQL_BIND *r_param,
@@ -2083,6 +2334,13 @@ void mysql_init_ps_subsystem(void)
   mysql_ps_fetch_functions[MYSQL_TYPE_OB_TIMESTAMP_WITH_TIME_ZONE].pack_len  = MYSQL_PS_SKIP_RESULT_W_LEN;
   mysql_ps_fetch_functions[MYSQL_TYPE_OB_TIMESTAMP_WITH_TIME_ZONE].max_len  = -1;
 
+  mysql_ps_fetch_functions[MYSQL_TYPE_OB_INTERVAL_YM].func = ps_fetch_oracle_interval;
+  mysql_ps_fetch_functions[MYSQL_TYPE_OB_INTERVAL_YM].pack_len = MYSQL_PS_SKIP_RESULT_W_LEN;
+  mysql_ps_fetch_functions[MYSQL_TYPE_OB_INTERVAL_YM].max_len = -1;
+
+  mysql_ps_fetch_functions[MYSQL_TYPE_OB_INTERVAL_DS].func = ps_fetch_oracle_interval;
+  mysql_ps_fetch_functions[MYSQL_TYPE_OB_INTERVAL_DS].pack_len = MYSQL_PS_SKIP_RESULT_W_LEN;
+  mysql_ps_fetch_functions[MYSQL_TYPE_OB_INTERVAL_DS].max_len = -1;
 
   mysql_ps_fetch_functions[MYSQL_TYPE_NEWDATE].func    = ps_fetch_string;
   mysql_ps_fetch_functions[MYSQL_TYPE_NEWDATE].pack_len  = MYSQL_PS_SKIP_RESULT_W_LEN;
@@ -2096,19 +2354,19 @@ void mysql_init_ps_subsystem(void)
   mysql_ps_fetch_functions[MYSQL_TYPE_TIMESTAMP].pack_len= MYSQL_PS_SKIP_RESULT_W_LEN;
   mysql_ps_fetch_functions[MYSQL_TYPE_TIMESTAMP].max_len  = 30;
   
-  mysql_ps_fetch_functions[MYSQL_TYPE_TINY_BLOB].func  = ps_fetch_bin;
+  mysql_ps_fetch_functions[MYSQL_TYPE_TINY_BLOB].func  = ps_fetch_mysql_lob;
   mysql_ps_fetch_functions[MYSQL_TYPE_TINY_BLOB].pack_len= MYSQL_PS_SKIP_RESULT_STR;
   mysql_ps_fetch_functions[MYSQL_TYPE_TINY_BLOB].max_len  = -1;
 
-  mysql_ps_fetch_functions[MYSQL_TYPE_BLOB].func    = ps_fetch_bin;
+  mysql_ps_fetch_functions[MYSQL_TYPE_BLOB].func    = ps_fetch_mysql_lob;
   mysql_ps_fetch_functions[MYSQL_TYPE_BLOB].pack_len  = MYSQL_PS_SKIP_RESULT_STR;
   mysql_ps_fetch_functions[MYSQL_TYPE_BLOB].max_len  = -1;
   
-  mysql_ps_fetch_functions[MYSQL_TYPE_MEDIUM_BLOB].func  = ps_fetch_bin;
+  mysql_ps_fetch_functions[MYSQL_TYPE_MEDIUM_BLOB].func  = ps_fetch_mysql_lob;
   mysql_ps_fetch_functions[MYSQL_TYPE_MEDIUM_BLOB].pack_len= MYSQL_PS_SKIP_RESULT_STR;
   mysql_ps_fetch_functions[MYSQL_TYPE_MEDIUM_BLOB].max_len  = -1;
 
-  mysql_ps_fetch_functions[MYSQL_TYPE_LONG_BLOB].func    = ps_fetch_bin;
+  mysql_ps_fetch_functions[MYSQL_TYPE_LONG_BLOB].func    = ps_fetch_mysql_lob;
   mysql_ps_fetch_functions[MYSQL_TYPE_LONG_BLOB].pack_len  = MYSQL_PS_SKIP_RESULT_STR;
   mysql_ps_fetch_functions[MYSQL_TYPE_LONG_BLOB].max_len  = -1;
 
@@ -2173,8 +2431,8 @@ void mysql_init_ps_subsystem(void)
   mysql_ps_fetch_functions[MYSQL_TYPE_ORA_CLOB].pack_len    = MYSQL_PS_SKIP_RESULT_STR;
   mysql_ps_fetch_functions[MYSQL_TYPE_ORA_CLOB].max_len  = -1;
 
-  mysql_ps_fetch_functions[MYSQL_TYPE_OB_RAW].func      = ps_fetch_string;
-  mysql_ps_fetch_functions[MYSQL_TYPE_OB_RAW].pack_len  = MYSQL_PS_SKIP_RESULT_STR;
+  mysql_ps_fetch_functions[MYSQL_TYPE_OB_RAW].func      = ps_fetch_oracle_raw;
+  mysql_ps_fetch_functions[MYSQL_TYPE_OB_RAW].pack_len  = MYSQL_PS_SKIP_RESULT_W_LEN;
   mysql_ps_fetch_functions[MYSQL_TYPE_OB_RAW].max_len   = -1;
 
   mysql_ps_fetch_functions[MYSQL_TYPE_OBJECT].func    = ps_fetch_result_type;

@@ -24,7 +24,6 @@
 #include <mariadb_dyncol.h>
 #include <stdint.h>
 #include <ma_list.h>
-#include <ob_object.h>
 #include <ob_full_link_trace.h>
 
 

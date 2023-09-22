@@ -389,8 +389,6 @@ uchar *fill_protocol20_header(Ob20Protocol *ob20protocol, size_t len, size_t pkt
 {
   size_t pos = 0;
 
-  // printf("write request %u\n", ob20protocol->header.request_id);
-
   int3store(&buffer[NET_HEADER_SIZE], complen);
   int3store(&buffer[pos], len);
   buffer[3]=(uchar) (pkt_nr);
@@ -416,6 +414,22 @@ uchar *fill_protocol20_header(Ob20Protocol *ob20protocol, size_t len, size_t pkt
   ob20protocol->header.header_checksum = ob_crc16(0, (uint8_t *)buffer, pos);
   int2store(&buffer[pos], ob20protocol->header.header_checksum);
   pos += 2;
+
+  #ifdef DEBUG_OB20
+    printf("////////////////begin ob20 pkt write[%u]//////////////////////////\n", pkt_nr);
+    printf("mysql pkt_len is %u\n", len);
+    printf("mysql pkt_nr is %u\n", pkt_nr);
+    printf("complen is %u\n", complen);
+    printf("magic_num is %u\n", ob20protocol->header.magic_num);
+    printf("version is %u\n", ob20protocol->header.version);
+    printf("connection_id is %u\n", ob20protocol->header.connection_id);
+    printf("request_id is %u\n", ob20protocol->header.request_id);
+    printf("ob20 pkt_seq is %u\n", ob20protocol->header.pkt_seq);
+    printf("ob20 payload_len is %u\n", ob20protocol->header.payload_len);
+    printf("flag is %u\n", ob20protocol->header.flag.flags);
+    printf("header checksum is %u\n", ob20protocol->header.header_checksum);
+    printf("////////////////end ob20 pkt write[%u]//////////////////////////\n", pkt_nr);
+#endif
 
   return buffer + pos;
 }
@@ -468,22 +482,6 @@ int decode_protocol20_header(Ob20Protocol *ob20protocol, uchar *buffer, uint32_t
     crc16 = 0;
   }
 
-#ifdef DEBUG_OB20
-    printf("////////////////begin ob20 pkt [%u]//////////////////////////\n", pkt_nr);
-    printf("mysql pkt_len is %u\n", pkt_len);
-    printf("mysql pkt_nr is %u\n", pkt_nr);
-    printf("complen is %u\n", complen);
-    printf("magic_num is %u\n", magic_num);
-    printf("version is %u\n", version);
-    printf("connection_id is %u\n", connection_id);
-    printf("request_id is %u\n", request_id);
-    printf("ob20 pkt_seq is %u\n", pkt_seq);
-    printf("ob20 payload_len is %u\n", payload_len);
-    printf("flag is %u\n", flag.flags);
-    printf("header checksum is %u\n", header_checksum);
-    printf("////////////////end ob20 pkt [%u]//////////////////////////\n", pkt_nr);
-#endif
-
   if (crc16 != header_checksum) {
     ret = 1;        // error
   } else if (magic_num != ob20protocol->header.magic_num) {
@@ -495,10 +493,8 @@ int decode_protocol20_header(Ob20Protocol *ob20protocol, uchar *buffer, uint32_t
   } else if (request_id != ob20protocol->header.request_id) {
     ret = 1;        // error
   } else {
-      //check request id and pkt_seq
     ob20protocol->header.pkt_seq++;
     if (pkt_seq != ob20protocol->header.pkt_seq) {
-      // printf("pkt_seq check error, local is %u, header is %u\n", ob20protocol->header.pkt_seq, pkt_seq);
       ret = 1;        // error   
     } else {
       ob20protocol->header.flag = flag;
@@ -509,6 +505,26 @@ int decode_protocol20_header(Ob20Protocol *ob20protocol, uchar *buffer, uint32_t
     }
   }
 
+#ifdef DEBUG_OB20
+    printf("////////////////begin ob20 pkt read[%u]//////////////////////////\n", pkt_nr);
+    printf("mysql pkt_len is %u\n", pkt_len);
+    printf("mysql pkt_nr is %u\n", pkt_nr);
+    printf("complen is %u\n", complen);
+    printf("magic_num is %u\n", magic_num);
+    printf("version is %u\n", version);
+    printf("connection_id is %u\n", connection_id);
+    printf("request_id is %u\n", request_id);
+    printf("ob20 pkt_seq is %u\n", pkt_seq);
+    printf("ob20 payload_len is %u\n", payload_len);
+    printf("flag is %u\n", flag.flags);
+    printf("header checksum is %u\n", header_checksum);
+
+    if (0 != ret) {
+      printf("decode header error\n");
+    }
+    printf("////////////////end ob20 pkt read[%u]//////////////////////////\n", pkt_nr);
+#endif
+
   return ret;
 }
 
@@ -517,7 +533,6 @@ int extrainfo_serialize_flt(char *buf, const int64_t len, int64_t *ppos, void *d
   int ret = OB_SUCCESS;
   int64_t pos = *ppos;
   FLTValueData *flt_data = (FLTValueData *)data;
-  // data是flt_build_request中生成，函数中需要保证生成string类型
   int64_t v_len = flt_data->length;
 
   if (OB_ISNULL(buf)) {
@@ -579,13 +594,13 @@ int extrainfo_deserialize_flt(const char *buf, const int64_t len, int64_t *ppos,
           }
         }
       } else {
-        // 对于不识别的key，需要跳过
+        // For unrecognized keys, need to skip
         pos += tmp_v_len;
       }
     }
   }
   if (OB_SUCC(ret)) {
-    *ppos = pos;    // 最后设置好pos
+    *ppos = pos;
   }
   return ret;
 }
@@ -616,7 +631,7 @@ uchar *fill_protocol20_extra_info(Ob20Protocol *ob20protocol, uchar *buffer, siz
     while (NULL != ob20protocol->extra_info_list.current) {
       extra_info_item = ob20protocol->extra_info_list.current->data;
       if (OB_ISNULL(extra_serialize_funcs[extra_info_item->key].serialize_func)) {
-        // 函数指针没有设置, do nothing, 跳到下一个key
+        // do nothing
       } if (OB_FAIL(extra_serialize_funcs[extra_info_item->key].serialize_func(packet + pos, buffer_len, &pos, extra_info_item->value))) {
         return buffer;
       }
@@ -669,7 +684,7 @@ int decode_protocol20_extra_info(Ob20Protocol *ob20protocol, uchar *buffer)
 
     check_pos = pos;
     if (OB_ISNULL(extra_serialize_funcs[key_type].deserialize_func)) {
-      // 如果函数指针没有设置，直接跳过value不解析
+      // If the function pointer is not set, skip the value directly without parsing
       pos += value_len;
     } else if (OB_FAIL(extra_serialize_funcs[key_type].deserialize_func(row, extra_info_len, &pos, ob20protocol, sizeof(*ob20protocol)))) {
       // error

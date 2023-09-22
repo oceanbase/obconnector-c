@@ -20,7 +20,7 @@
 #define _ob_full_link_trace_h
 
 #include <stdint.h>
-#include "ob_object.h"
+#include "mysql.h"
 #include "ma_list.h"
 #include "ob_thread_key.h"
 
@@ -44,11 +44,12 @@
     if (get_use_full_link_trace(mysql) && OB_NOT_NULL(ob20protocol)) {  \
       flt = ob20protocol->flt;                                          \
       if (OB_NOT_NULL(flt)) {                                           \
-        if (mysql->server_status & SERVER_STATUS_IN_TRANS) {            \
+        if ((TRUE == flt->control_info_.flt_show_trace_enable_)         \
+          || !(mysql->server_status & SERVER_STATUS_IN_TRANS)) {        \
+          BEGIN_TRACE(flt);                                             \
+        } else {                                                        \
           /* A reset is required before each begin in the current transaction to prevent insufficient span*/           \
           reset_span(flt->trace_);                                      \
-        } else {                                                        \
-          BEGIN_TRACE(flt);                                             \
         }                                                               \
         span = BEGIN_SPAN(flt, span_level);                             \
         SET_TAG(flt, tag_level, tag_str);                               \
@@ -78,10 +79,8 @@
           trace->slow_query_print_ = FALSE;   /* Slow query is set to FALSE for each request */ \
           flush_first_span(trace);                                              \
         }                                                                       \
-        if (mysql->server_status & SERVER_STATUS_IN_TRANS) {                    \
-          /* do nothing */                                                      \
-        } else {                                                                \
-          /* 不在事务中需要结束trace */                                            \
+        if ((TRUE == flt->control_info_.flt_show_trace_enable_)                 \
+          || !(mysql->server_status & SERVER_STATUS_IN_TRANS)) {                \
           END_TRACE(flt);                                                       \
         }                                                                       \
       }                                                                         \
@@ -104,15 +103,20 @@
 #define DEFINE_TO_STRING_FUNC_FOR(type) \
   int tostring_##type(char *buf, const int64_t buf_len, int64_t *pos, type *src)
 
-// Currently maintains a size of 4k for each trace, which is the size of all space allocated during the entire trace
-#define OBTRACE_DEFAULT_BUFFER_SIZE (1L << 12)
+// Currently maintains a size of 5k for each trace, which is the size of all space allocated during the entire trace
+#define OBTRACE_DEFAULT_BUFFER_SIZE (5 * (1L << 10))
 // The current driver free span is 4
 #define SPAN_CACHE_COUNT (1L << 2)
+// The current driver free span is 4
+#define TAG_CACHE_COUNT (1L << 4)
 // Since there is currently at most one SPAN, the largest LOG buffer is 1k
 #define MAX_TRACE_LOG_SIZE (1L << 10)
 // The current maximum size of the full link after serialization is 2k
 #define MAX_FLT_SERIALIZE_SIZE (1L << 11)
-#define INIT_OFFSET (MAX_TRACE_LOG_SIZE + MAX_FLT_SERIALIZE_SIZE + SPAN_CACHE_COUNT * (sizeof(LIST) + sizeof(ObSpanCtx)))
+// span cache begin buffer
+#define TAG_BUFFER_BEGIN ((2 * MAX_TRACE_LOG_SIZE) + MAX_FLT_SERIALIZE_SIZE)
+#define SPAN_BUFFER_BEGIN ((2 * MAX_TRACE_LOG_SIZE) + MAX_FLT_SERIALIZE_SIZE + TAG_CACHE_COUNT * (sizeof(ObTagCtx)))
+#define INIT_OFFSET (SPAN_BUFFER_BEGIN + SPAN_CACHE_COUNT * (sizeof(LIST) + sizeof(ObSpanCtx)))
 
 #define OBTRACE(flt) get_trace_instance(flt)
 #define BEGIN_TRACE(flt) (begin_trace(OBTRACE(flt)))
@@ -171,14 +175,17 @@ typedef enum enum_fulllinktraceextrainfoid
   FLT_SAMPLE_PERCENTAGE,
   FLT_RECORD_POLICY,
   FLT_PRINT_SAMPLE_PCT,
-  FLT_SHOW_TRACE_ENABLE,
   FLT_SLOW_QUERY_THRES,
+  FLT_SHOW_TRACE_ENABLE,
   // SPAN_INFO
   FLT_TRACE_ENABLE = 2030,
   FLT_FORCE_PRINT,
   FLT_TRACE_ID,
   FLT_REF_TYPE,
   FLT_SPAN_ID,
+  // FLT_SHOW_TRACE
+  FLT_DRV_SHOW_TRACE_SPAN = 2050,
+  FLT_PROXY_SHOW_TRACE_SPAN,
   FLT_EXTRA_INFO_ID_END
 } FullLinkTraceExtraInfoId;
 
@@ -196,6 +203,8 @@ typedef enum enum_fulllinktraceextrainfotype
   FLT_QUERY_INFO,
   FLT_CONTROL_INFO,
   FLT_SPAN_INFO,
+  FLT_TYPE_SHOW_TRACE_SPAN,
+
   FLT_EXTRA_INFO_TYPE_END
 } FullLinkTraceExtraInfoType;
 
@@ -219,6 +228,8 @@ typedef struct st_fltcontrolinfo
   RecordPolicy rp_;
   double print_sample_pct_;
   int64_t slow_query_threshold_;
+
+  int8_t  flt_show_trace_enable_;									// enable show trace or not
 } FLTControlInfo;
 
 typedef struct st_fltappinfo
@@ -253,6 +264,12 @@ typedef struct st_fltdriverspaninfo
   const char *client_span_;
 } FLTDriverSpanInfo;
 
+typedef struct st_showtracespan
+{
+  FullLinkTraceExtraInfoType type_;
+  const char *client_span_json_;
+} FLTShowTraceSpan;
+
 typedef struct st_fltvaluedata
 {
   void *value_data_;
@@ -261,6 +278,7 @@ typedef struct st_fltvaluedata
 
 typedef struct st_fltinfo
 {
+  FLTShowTraceSpan show_trace_span_;
   FLTDriverSpanInfo client_span_;
   FLTControlInfo control_info_;
   FLTAppInfo app_info_;
@@ -340,6 +358,7 @@ struct st_obtrace
   uint64_t seq_;
   my_bool in_trans_;
   my_bool trace_enable_;
+  my_bool show_trace_enable_;
   my_bool force_print_;
   my_bool slow_query_print_;
   FLTInfo *flt;                 // point to flt struct
@@ -349,6 +368,7 @@ struct st_obtrace
   LIST *current_span_list_;
   LIST *free_span_list_;
   ObSpanCtx *last_active_span_;
+  ObTagCtx free_tag_list_;
   union {
     uint8_t policy_;
     struct {
@@ -358,6 +378,8 @@ struct st_obtrace
   };
   uint64_t log_buf_offset_;
   char *log_buf_;   // size is MAX_TRACE_LOG_SIZE
+  uint64_t show_trace_buf_offset_;
+  char *show_trace_buf_;   // size is MAX_TRACE_LOG_SIZE
   char *flt_serialize_buf_;  // size is MAX_FLT_SERIALIZE_SIZE
   char data_[0];   // Multi-allocated space to store free span and facilitate subsequent tagging
 };
@@ -370,6 +392,7 @@ ObSpanCtx* begin_span(ObTrace *trace, uint32_t span_type, uint8_t level, my_bool
 void end_span(ObTrace *trace, ObSpanCtx *span);
 void reset_span(ObTrace *trace);
 void append_tag(ObTrace *trace, ObSpanCtx *span, uint16_t tag_type, const char *str);
+void reset_tag(ObTrace *trace, ObSpanCtx *span, ObTagCtx *tag);
 ObTrace *get_trace_instance(FLTInfo *flt);
 void flush_first_span(ObTrace *trace);
 void flush_trace(ObTrace *trace);
@@ -379,6 +402,7 @@ DEFINE_FLT_SERIALIZE_FUNC(queryinfo);       // FLT_QUERY_INFO
 DEFINE_FLT_SERIALIZE_FUNC(controlinfo);     // FLT_CONTROL_INFO
 DEFINE_FLT_SERIALIZE_FUNC(spaninfo);        // FLT_SPAN_INFO
 DEFINE_FLT_SERIALIZE_FUNC(driverspaninfo);  // FLT_DRIVER_SPAN_INFO
+DEFINE_FLT_SERIALIZE_FUNC(showtracespan);   // FLT_TYPE_SHOW_TRACE_SPAN
 DEFINE_FLT_SERIALIZE_FUNC(nosupport);       // FLT_EXTRA_INFO_TYPE_END
 
 my_bool flt_is_vaild(FLTInfo *flt);
