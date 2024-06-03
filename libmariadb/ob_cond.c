@@ -25,7 +25,7 @@
 
 #ifdef _WIN32
 #include <time.h>
-
+#include <limits.h>
 union ft64 {
   FILETIME ft;
   __int64 i64;

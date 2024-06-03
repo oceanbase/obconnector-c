@@ -49,6 +49,15 @@ do { \
   (a)->last_error[MYSQL_ERRMSG_SIZE - 1]= 0;\
 } while (0)
 
+#define SET_OB_CLIENT_STMT_ERROR(a, b, c, d) \
+do { \
+  (a)->last_errno= (b);\
+  strncpy((a)->sqlstate, (c), SQLSTATE_LENGTH);\
+  (a)->sqlstate[SQLSTATE_LENGTH]= 0;\
+  strncpy((a)->last_error, (d) ? (d) : OBER((b)), MYSQL_ERRMSG_SIZE);\
+  (a)->last_error[MYSQL_ERRMSG_SIZE - 1]= 0;\
+} while (0)
+
 #define CLEAR_CLIENT_STMT_ERROR(a) \
 do { \
   (a)->last_errno= 0;\
@@ -471,8 +480,18 @@ enum enum_ob_client_lob_locatorv2
 };
 my_bool determine_ob_client_lob_locatorv2(MYSQL *mysql);
 my_bool get_use_ob_client_lob_locatorv2(MYSQL *mysql);
+/*end for support lobv2*/
 
-my_bool set_nls_format(MYSQL *mysql);
+enum enum_load_infiles
+{
+  LOAD_INFILES_FORCE_CLOSE = 0,
+  LOAD_INFILES_AUTO_OPEN,
+  LOAD_INFILES_FORCE_OPEN,
+  LOAD_INFILES_FLAY_MAX
+};
+my_bool determine_load_infiles(MYSQL *mysql);
+my_bool get_use_load_infiles(MYSQL *mysql);
+/*end for load infiles*/
 
 /* add for support bindbyname for plarray */
 struct prepare_extend_args_t

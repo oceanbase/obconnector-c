@@ -1251,7 +1251,7 @@ void ps_fetch_oracle_interval(MYSQL_BIND *param, const MYSQL_FIELD *field, uchar
   {
   case MYSQL_TYPE_OB_INTERVAL_DS: {
     *param->length = sizeof(ORACLE_INTERVAL);
-    if (length != 14) {
+    if (param->buffer_length < sizeof(ORACLE_INTERVAL) || length != 14) {
       *param->error = 1;
     } else {
       ORACLE_INTERVAL * interval = (ORACLE_INTERVAL*)param->buffer;
@@ -1269,7 +1269,7 @@ void ps_fetch_oracle_interval(MYSQL_BIND *param, const MYSQL_FIELD *field, uchar
   }
   case MYSQL_TYPE_OB_INTERVAL_YM: {
     *param->length = sizeof(ORACLE_INTERVAL);
-    if (length != 7) {
+    if (param->buffer_length < sizeof(ORACLE_INTERVAL) || length != 7) {
       *param->error = 1;
     } else {
       ORACLE_INTERVAL * interval = (ORACLE_INTERVAL*)param->buffer;

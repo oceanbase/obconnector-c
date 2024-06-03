@@ -62,7 +62,8 @@ struct st_ma_pvio_methods pvio_npipe_methods= {
   pvio_npipe_is_blocking,
   pvio_npipe_is_alive,
   NULL,
-  pvio_npipe_shutdown
+  pvio_npipe_shutdown,
+  NULL
 };
 
 #ifndef PLUGIN_DYNAMIC

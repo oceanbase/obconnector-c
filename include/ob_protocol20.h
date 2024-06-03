@@ -103,6 +103,7 @@ typedef struct st_ob20protocol
   
   // extra info
   FLTInfo *flt;    // full link trace
+  my_bool update_request_id;
 } Ob20Protocol;
 
 typedef int (*extrainfo_serialize_func)(char *buf, const int64_t len, int64_t *pos, void *data);

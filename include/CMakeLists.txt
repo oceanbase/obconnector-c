@@ -22,6 +22,7 @@ SET(MARIADB_CLIENT_INCLUDES ${CC_SOURCE_DIR}/include/mariadb_com.h
                             ${CC_SOURCE_DIR}/include/ob_protocol20.h
                             ${CC_SOURCE_DIR}/include/ob_object.h
                             ${CC_SOURCE_DIR}/include/ob_full_link_trace.h
+                            ${CC_SOURCE_DIR}/include/ob_load_balance.h
                             ${CC_SOURCE_DIR}/include/mariadb_rpl.h
                             )
 IF(NOT IS_SUBPROJECT)

@@ -516,6 +516,13 @@ my_bool ma_pvio_has_data(MARIADB_PVIO *pvio, ssize_t *data_len)
   return 1;
 }
 /* }}} */
+int ma_pvio_socket5_auth(MARIADB_PVIO *pvio, char *user, char *pwd, char *host, unsigned short port)
+{
+  if (pvio && pvio->methods->socket5_auth)
+    return pvio->methods->socket5_auth(pvio, user, pwd, host, port);
+  return -1;
+}
+
 
 #ifdef HAVE_TLS
 /* {{{ my_bool ma_pvio_start_ssl */

@@ -171,6 +171,15 @@ enum ObClientRoutineParamInOut
     (a)->net.last_error[MYSQL_ERRMSG_SIZE - 1]= 0;\
   } while(0)
 
+#define SET_OB_CLIENT_ERROR(a, b, c, d) \
+  do { \
+    (a)->net.last_errno= (b);\
+    strncpy((a)->net.sqlstate, (c), SQLSTATE_LENGTH);\
+    (a)->net.sqlstate[SQLSTATE_LENGTH]= 0;\
+    strncpy((a)->net.last_error, (d) ? (d) : OBER((b)), MYSQL_ERRMSG_SIZE - 1);\
+    (a)->net.last_error[MYSQL_ERRMSG_SIZE - 1]= 0;\
+  } while(0)
+
 /* For mysql_async.c */
 #define set_mariadb_error(A,B,C) SET_CLIENT_ERROR((A),(B),(C),0)
 extern const char *SQLSTATE_UNKNOWN;
@@ -279,7 +288,8 @@ extern const char *SQLSTATE_UNKNOWN;
     MARIADB_OPT_MULTI_STATEMENTS,
     MARIADB_OPT_INTERACTIVE,
     MARIADB_OPT_PROXY_HEADER,
-    MARIADB_OPT_IO_WAIT
+    MARIADB_OPT_IO_WAIT,
+    OB_OPT_PROXY_USER = 8000  /*ob option start 8000*/
   };
 
   enum mariadb_value {
@@ -340,7 +350,7 @@ struct st_mysql_options {
     unsigned int connect_timeout, read_timeout, write_timeout;
     unsigned int port, protocol;
     unsigned long client_flag;
-    char *host,*user,*password,*unix_socket,*db;
+    char *host,*user,*password,*unix_socket,*db,*proxy_user;
     struct st_dynamic_array *init_command;
     char *my_cnf_file,*my_cnf_group, *charset_dir, *charset_name;
     char *ssl_key;				/* PEM key file */
@@ -369,7 +379,7 @@ struct st_mysql_options {
   typedef struct st_mysql {
     NET		net;			/* Communication parameters */
     void  *unused_0;
-    char *host,*user,*passwd,*unix_socket,*server_version,*host_info;
+    char *host,*user,*passwd,*unix_socket,*server_version,*host_info,*proxy_user;
     char *info,*db;
     const struct ma_charset_info_st *charset;      /* character set */
     MYSQL_FIELD *fields;
@@ -410,9 +420,14 @@ struct st_mysql_options {
     my_bool       can_use_full_link_trace;
     my_bool       can_use_ob_client_lob_locatorv2;
     my_bool       can_use_flt_show_trace;
+    my_bool       can_use_load_infiles;
     unsigned long ob_server_version;
     unsigned long ob_proxy_version;
     unsigned long capability; // system varaiable
+    my_bool is_socket5; //1 open socket5
+    char socket5_authtype;
+    char *socket5_host, *socket5_user, *socket5_pwd;
+    int socket5_port;
 } MYSQL;
 
 /**
@@ -425,9 +440,9 @@ struct st_mysql_options {
  *  This structure is used as mysql->extension.res_extension field
  */
 typedef struct st_ob_result_extension {
-  ulong pkt_len;
+  unsigned long pkt_len;
   char *pkt_buffer;
-  MYSQL_FIELD *mysql_fields;   // ±£¥Êfield–≈œ¢
+  MYSQL_FIELD *mysql_fields;   // ‰øùÂ≠òfield‰ø°ÊÅØ
 } OB_RES_EXT;
 
 struct st_mysql_trace_info;
@@ -1017,6 +1032,8 @@ struct st_mariadb_methods {
 #define mysql_library_end mysql_server_end
 
 /* new api functions */
+void ob_get_libobclient_version(int *major, int *minor, int *patch, char* version, int len);
+void ob_set_socket5_proxy(MYSQL *mysql, char socket5_authtype, char *socket5_host, int socket5_port, char *socket5_user, char *socket5_pwd);
 
 #define HAVE_MYSQL_REAL_CONNECT
 

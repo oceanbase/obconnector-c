@@ -203,7 +203,7 @@ int ma_net_write(NET *net, const uchar *packet, size_t len)
   uchar buff[NET_HEADER_SIZE];
   unsigned long max_packet_length = MAX_PACKET_LENGTH;
   // update ob20 request id
-  if (net->use_ob20protocol && OB_NOT_NULL(net->ob20protocol)) {
+  if (net->use_ob20protocol && OB_NOT_NULL(net->ob20protocol) && net->ob20protocol->update_request_id) {
     update_request_id(&net->ob20protocol->header.request_id);
   }
   while (len >= max_packet_length)

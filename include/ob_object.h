@@ -87,7 +87,7 @@ typedef enum enum_obobjtype
   ObMaxType                 // invalid type, or count of obj type
 } ObObjType;
 
-enum enum_obcollationtype
+typedef enum enum_obcollationtype
 {
   CS_TYPE_INVALID = 0,
   CS_TYPE_GBK_CHINESE_CI = 28,
@@ -104,7 +104,7 @@ enum enum_obcollationtype
   CS_TYPE_MAX,
 } ObCollationType;
 
-enum enum_obcollationlevel
+typedef enum enum_obcollationlevel
 {
   CS_LEVEL_EXPLICIT = 0,
   CS_LEVEL_NONE = 1,
