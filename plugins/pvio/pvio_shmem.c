@@ -60,7 +60,8 @@ struct st_ma_pvio_methods pvio_shm_methods= {
   NULL,
   pvio_shm_is_alive,
   NULL,
-  pvio_shm_shutdown
+  pvio_shm_shutdown,
+  NULL
 };
 
 #ifndef PLUGIN_DYNAMIC

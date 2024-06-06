@@ -1,6 +1,6 @@
 Name: %NAME
 Version: %VERSION
-Release: %(echo %RELEASE)%{?dist}
+Release: %(echo %RELEASE)
 License: LGPL
 Group: applications/database
 buildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root
@@ -14,7 +14,7 @@ LibObClient is a driver used to connect applications developed in C to OceanBase
 %define MYSQL_USER root
 %define MYSQL_GROUP root
 %define __os_install_post %{nil}
-%define base_dir /u01/mysql
+#%define base_dir /u01/mysql
 %define file_dir /app/mariadb
 
 
@@ -54,11 +54,12 @@ rm -rf $RPM_BUILD_ROOT
 %pre
 
 %post
-if [ -d %{base_dir} ]; then
-    cp -rf %{prefix}/* %{base_dir}
-else
-    cp -rf %{prefix} %{base_dir}
-fi
+#if [ -d %{base_dir} ]; then
+#    cp -rf %{prefix}/* %{base_dir}
+#else
+#    cp -rf %{prefix} %{base_dir}
+#fi
+
 %preun
 
 %changelog

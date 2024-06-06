@@ -341,6 +341,9 @@ SET(MARIADB_NONBLOCK_SYMBOLS
  get_ob_lob_locator_version
  get_ob_lob_payload_data_len
  stmt_get_data_from_lobv2
+ ob_mysql_real_connect
+ ob_get_libobclient_version
+ ob_set_socket5_proxy
 )
 
 # handle static plugins
@@ -392,6 +395,9 @@ ob_full_link_trace.c
 ob_rwlock.c
 ob_cond.c
 ob_thread_key.c
+ob_load_balance.c
+ob_utils.c
+ob_tnsname.c
 ${CC_BINARY_DIR}/libmariadb/ma_client_plugin.c
 ma_io.c
 ${SSL_SOURCES}

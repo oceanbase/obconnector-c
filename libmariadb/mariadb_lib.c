@@ -469,7 +469,8 @@ mthd_my_send_cmd(MYSQL *mysql,enum enum_server_command command, const char *arg,
   if (mysql->status != MYSQL_STATUS_READY ||
       mysql->server_status & SERVER_MORE_RESULTS_EXIST)
   {
-    SET_CLIENT_ERROR(mysql, CR_COMMANDS_OUT_OF_SYNC, SQLSTATE_UNKNOWN, 0);
+    //SET_CLIENT_ERROR(mysql, CR_COMMANDS_OUT_OF_SYNC, SQLSTATE_UNKNOWN, 0);
+    SET_OB_CLIENT_ERROR(mysql, CR_STATUS_ERROR_NOT_READY, SQLSTATE_UNKNOWN, 0);
     goto end;
   }
 
@@ -753,6 +754,7 @@ struct st_default_options mariadb_defaults[] =
   {MYSQL_SERVER_PUBLIC_KEY, MARIADB_OPTION_STR, "server-public-key"},
   {MYSQL_OPT_BIND, MARIADB_OPTION_STR, "bind-address"},
   {MYSQL_OPT_SSL_ENFORCE, MARIADB_OPTION_BOOL, "ssl-enforce"},
+  {OB_OPT_PROXY_USER, MARIADB_OPTION_STR, "proxy-user"},
   {0, 0, NULL}
 };
 
@@ -2019,6 +2021,7 @@ mysql_init(MYSQL *mysql)
       !(mysql->extension= (struct st_mariadb_extension *)
                           calloc(1, sizeof(struct st_mariadb_extension))))
     goto error;
+
   mysql->options.report_data_truncation= 1;
   mysql->options.connect_timeout=CONNECT_TIMEOUT;
   mysql->charset= mysql_find_charset_name(MARIADB_DEFAULT_CHARSET);
@@ -2142,16 +2145,24 @@ ma_set_ob_connect_attrs(MYSQL *mysql)
     cap &= ~OBCLIENT_CAP_PROXY_NEW_EXTRA_INFO;
     cap &= ~OBCLIENT_CAP_PROXY_FULL_LINK_TRACE_SHOW_TRACE;
   }
+  if (mysql->can_use_load_infiles) {
+    cap |= OBCLIENT_CAP_PROXY_LOCAL_INFILES;
+  }
   
   snprintf(cap_buf, OB_MAX_UINT64_BUF_LEN, "%lu", cap);
 
   rc += mysql_optionsv(mysql, MYSQL_OPT_CONNECT_ATTR_ADD, OB_MYSQL_CAPABILITY_FLAG, cap_buf);
   rc += mysql_optionsv(mysql, MYSQL_OPT_CONNECT_ATTR_ADD, OB_MYSQL_CLIENT_MODE, "__ob_libobclient");
+  rc += mysql_optionsv(mysql, MYSQL_OPT_CONNECT_ATTR_ADD, OB_MYSQL_CLIENT_NAME_KEY, OB_MYSQL_CLIENT_NAME_VALUE);
+  rc += mysql_optionsv(mysql, MYSQL_OPT_CONNECT_ATTR_ADD, OB_MYSQL_CLIENT_VERSION_KEY, LIBOBCLIENT_VERSION);
 
   if (mysql->can_use_ob_client_lob_locatorv2) {
     caplob |= OBCLIENT_CAP_OB_LOB_LOCATOR_V2;
     snprintf(caplob_buf, OB_MAX_UINT64_BUF_LEN, "%lu", caplob);
     rc += mysql_optionsv(mysql, MYSQL_OPT_CONNECT_ATTR_ADD, OB_MYSQL_LOB_LOCATOR_V2, caplob_buf);
+  }
+  if (mysql->proxy_user && mysql->proxy_user[0]) {
+    rc += mysql_optionsv(mysql, MYSQL_OPT_CONNECT_ATTR_ADD, OB_MYSQL_PROXY_USER_NAME, mysql->proxy_user);
   }
   return rc;
 }
@@ -2365,6 +2376,38 @@ static int get_ob_server_version(MYSQL *con)
   }
   return 0;
 }
+static my_bool set_nls_format(MYSQL *mysql)
+{
+  my_bool bret = TRUE;
+  if (mysql->oracle_mode) {
+    char *nls_date_format = getenv("NLS_DATE_FORMAT");
+    char *nls_timestamp_format = getenv("NLS_TIMESTAMP_FORMAT");
+    char *nls_timestamp_tz_format = getenv("NLS_TIMESTAMP_TZ_FORMAT");
+
+    if (NULL != nls_date_format) {
+      char change_date_format_sql[100];
+      snprintf(change_date_format_sql, 100, "ALTER SESSION SET NLS_DATE_FORMAT='%s';", nls_date_format);
+      if (mysql_query(mysql, change_date_format_sql)) {
+        bret = FALSE;
+      }
+    }
+    if (bret && NULL != nls_timestamp_format) {
+      char change_timestamp_format_sql[100];
+      snprintf(change_timestamp_format_sql, 100, "ALTER SESSION SET NLS_TIMESTAMP_FORMAT='%s';", nls_timestamp_format);
+      if (mysql_query(mysql, change_timestamp_format_sql)) {
+        bret = FALSE;
+      }
+    }
+    if (bret && NULL != nls_timestamp_tz_format) {
+      char change_timestamp_tz_format_sql[100];
+      snprintf(change_timestamp_tz_format_sql, 100, "ALTER SESSION SET NLS_TIMESTAMP_TZ_FORMAT='%s';", nls_timestamp_tz_format);
+      if (mysql_query(mysql, change_timestamp_tz_format_sql)) {
+        bret = FALSE;
+      }
+    }
+  }
+  return bret;
+}
 
 MYSQL *mthd_my_real_connect(MYSQL *mysql, const char *host, const char *user,
 		   const char *passwd, const char *db,
@@ -2483,6 +2526,10 @@ MYSQL *mthd_my_real_connect(MYSQL *mysql, const char *host, const char *user,
     cinfo.host= host;
     cinfo.port= port;
     cinfo.type= PVIO_TYPE_SOCKET;
+    if (mysql->is_socket5) {
+      cinfo.host = mysql->socket5_host;
+      cinfo.port = mysql->socket5_port;
+    }
     sprintf(host_info=buff,ER(CR_TCP_CONNECTION), cinfo.host);
   }
   /* Initialize and load pvio plugin */
@@ -2494,6 +2541,16 @@ MYSQL *mthd_my_real_connect(MYSQL *mysql, const char *host, const char *user,
   {
     ma_pvio_close(pvio);
     goto error;
+  }
+
+  //socket5
+  if (mysql->is_socket5)
+  {
+    int ret = 0;
+    if (0 != (ret = ma_pvio_socket5_auth(pvio, mysql->socket5_user, mysql->socket5_pwd, (char*)host, port))) {
+      my_set_error(mysql, CR_SOCKET_CREATE_ERROR, SQLSTATE_UNKNOWN, "socket5 proxy communication fail(%d).", ret);
+      goto error;
+    }
   }
 
   if (mysql->options.extension && mysql->options.extension->proxy_header)
@@ -2567,9 +2624,13 @@ MYSQL *mthd_my_real_connect(MYSQL *mysql, const char *host, const char *user,
   /* Save connection information */
   if (!user) user="";
 
+  if (mysql->options.proxy_user && mysql->options.proxy_user[0]) {
+    mysql->proxy_user = strdup(mysql->options.proxy_user);
+  }
+
   if (!(mysql->host_info= strdup(host_info)) ||
       !(mysql->host= strdup(cinfo.host ? cinfo.host : "")) ||
-      !(mysql->user=strdup(user)) ||
+      !(mysql->user=strdup(user ? user:"")) ||
       !(mysql->passwd=strdup(passwd)))
   {
     SET_CLIENT_ERROR(mysql, CR_OUT_OF_MEMORY, SQLSTATE_UNKNOWN, 0);
@@ -2688,6 +2749,7 @@ MYSQL *mthd_my_real_connect(MYSQL *mysql, const char *host, const char *user,
   determine_full_link_trace(mysql);
   determine_ob_client_lob_locatorv2(mysql);
   determine_flt_show_trace(mysql);
+  determine_load_infiles(mysql);
 
   if (run_plugin_auth(mysql, scramble_data, scramble_len,
                              scramble_plugin, db))
@@ -3040,6 +3102,9 @@ static void mysql_close_options(MYSQL *mysql)
   free(mysql->options.ssl_capath);
   free(mysql->options.ssl_cipher);
 
+  if (mysql->options.proxy_user) {
+    free(mysql->options.proxy_user);
+  }
   if (mysql->options.extension)
   {
     struct mysql_async_context *ctxt;
@@ -3081,13 +3146,9 @@ static void mysql_close_memory(MYSQL *mysql)
   free(mysql->db);
   free(mysql->unix_socket);
   free(mysql->server_version);
-  if (mysql->extension) {
-    free(mysql->extension);
-    mysql->extension = NULL;
-  }
-  if (mysql->ob_extension) {
-    mysql_extension_free((struct st_mysql_extension *)mysql->ob_extension);
-    mysql->ob_extension = NULL;
+  if (mysql->proxy_user) {
+    free(mysql->proxy_user);
+    mysql->proxy_user = 0;
   }
   mysql->host_info= mysql->host= mysql->unix_socket=
                     mysql->server_version=mysql->user=mysql->passwd=mysql->db=0;
@@ -3106,9 +3167,11 @@ void my_set_error(MYSQL *mysql,
   if (!format)
   {
     if (error_nr >= CR_MIN_ERROR && error_nr <= CR_MYSQL_LAST_ERROR)
-      errmsg= ER(error_nr);
+      errmsg = ER(error_nr);
     else if (error_nr >= CER_MIN_ERROR && error_nr <= CR_MARIADB_LAST_ERROR)
-      errmsg= CER(error_nr);
+      errmsg = CER(error_nr);
+    else if (error_nr >= OB_MIN_ERROR && error_nr <= CR_OB_LAST_ERROR)
+      errmsg = OBER(error_nr);
     else
       errmsg= ER(CR_UNKNOWN_ERROR);
   }
@@ -3176,20 +3239,45 @@ mysql_close(MYSQL *mysql)
     mysql_close_options(mysql);
     ma_clear_session_state(mysql);
 
-    if (mysql->net.extension)
+    if (mysql->net.extension) {
       free(mysql->net.extension);
+      mysql->net.extension = NULL;
+    }
 
     mysql->host_info=mysql->user=mysql->passwd=mysql->db=0;
+    mysql->proxy_user = 0;
 
     /* Clear pointers for better safety */
     memset((char*) &mysql->options, 0, sizeof(mysql->options));
 
-    if (mysql->extension)
+    if (mysql->extension) {
       free(mysql->extension);
+      mysql->extension = NULL;
+    }
+
+    if (mysql->ob_extension) {
+      mysql_extension_free((struct st_mysql_extension *)mysql->ob_extension);
+      mysql->ob_extension = NULL;
+    }
+
+    mysql->is_socket5 = 0;
+    if (mysql->socket5_host) {
+      free(mysql->socket5_host);
+      mysql->socket5_host = NULL;
+    }
+    if (mysql->socket5_user) {
+      free(mysql->socket5_user);
+      mysql->socket5_user = NULL;
+    }
+    if (mysql->socket5_pwd) {
+      free(mysql->socket5_pwd);
+      mysql->socket5_pwd = NULL;
+    }
 
     /* Clear pointers for better safety */
     mysql->net.extension = NULL;
     mysql->extension = NULL;
+    mysql->ob_extension = NULL;
 
     mysql->net.pvio= 0;
     if (mysql->free_me)
@@ -3542,7 +3630,8 @@ mysql_store_result(MYSQL *mysql)
     return(0);
   if (mysql->status != MYSQL_STATUS_GET_RESULT)
   {
-    SET_CLIENT_ERROR(mysql, CR_COMMANDS_OUT_OF_SYNC, SQLSTATE_UNKNOWN, 0);
+    //SET_CLIENT_ERROR(mysql, CR_COMMANDS_OUT_OF_SYNC, SQLSTATE_UNKNOWN, 0);
+    SET_CLIENT_ERROR(mysql, CR_STATUS_ERROR_NOT_GET_RESULT, SQLSTATE_UNKNOWN, 0);
     return(0);
   }
   mysql->status=MYSQL_STATUS_READY;		/* server is ready */
@@ -3591,7 +3680,8 @@ mysql_use_result(MYSQL *mysql)
     return(0);
   if (mysql->status != MYSQL_STATUS_GET_RESULT)
   {
-    SET_CLIENT_ERROR(mysql, CR_COMMANDS_OUT_OF_SYNC, SQLSTATE_UNKNOWN, 0);
+    //SET_CLIENT_ERROR(mysql, CR_COMMANDS_OUT_OF_SYNC, SQLSTATE_UNKNOWN, 0);
+    SET_CLIENT_ERROR(mysql, CR_STATUS_ERROR_NOT_GET_RESULT, SQLSTATE_UNKNOWN, 0);
     return(0);
   }
   if (!(result=(MYSQL_RES*) calloc(1, sizeof(*result)+
@@ -4227,6 +4317,8 @@ mysql_optionsv(MYSQL *mysql,enum mysql_option option, ...)
   case MARIADB_OPT_USER:
     OPT_SET_VALUE_STR(&mysql->options, user, arg1);
     break;
+  case OB_OPT_PROXY_USER:
+    OPT_SET_VALUE_STR(&mysql->options, proxy_user, arg1);
   case MARIADB_OPT_HOST:
     OPT_SET_VALUE_STR(&mysql->options, host, arg1);
     break;
@@ -4753,7 +4845,8 @@ int STDCALL mysql_next_result(MYSQL *mysql)
   /* make sure communication is not blocking */
   if (mysql->status != MYSQL_STATUS_READY)
   {
-    SET_CLIENT_ERROR(mysql, CR_COMMANDS_OUT_OF_SYNC, SQLSTATE_UNKNOWN, 0);
+    //SET_CLIENT_ERROR(mysql, CR_COMMANDS_OUT_OF_SYNC, SQLSTATE_UNKNOWN, 0);
+    SET_CLIENT_ERROR(mysql, CR_STATES_ERROR_NEXT_RESULT, SQLSTATE_UNKNOWN, 0);
     return(1);
   }
 
@@ -5558,3 +5651,40 @@ struct st_mariadb_methods MARIADB_DEFAULT_METHODS = {
   /* API functions */
   &MARIADB_API
 };
+
+void ob_get_libobclient_version(int *major, int *minor, int *patch, char* version, int len)
+{
+  if (major)
+    *major = LIBOBCLIENT_VERSION_MAJOR;
+  if (minor)
+    *minor = LIBOBCLIENT_VERSION_MINOR;
+  if (patch)
+    *patch = LIBOBCLIENT_VERSION_PATCH;
+  if (version)
+    memcpy(version, LIBOBCLIENT_VERSION, min(len, strlen(LIBOBCLIENT_VERSION)));
+}
+
+void ob_set_socket5_proxy(MYSQL *mysql, char socket5_authtype, char *socket5_host, int socket5_port, char *socket5_user, char *socket5_pwd)
+{
+  mysql->is_socket5 = 1;
+  mysql->socket5_authtype = socket5_authtype;
+  mysql->socket5_port = socket5_port;
+  if (mysql->socket5_host) {
+    free(mysql->socket5_host);
+    mysql->socket5_host = NULL;
+  }
+  if (mysql->socket5_user) {
+    free(mysql->socket5_user);
+    mysql->socket5_user = NULL;
+  }
+  if (mysql->socket5_pwd) {
+    free(mysql->socket5_pwd);
+    mysql->socket5_pwd = NULL;
+  }
+  if (socket5_host)
+    mysql->socket5_host = strdup(socket5_host);
+  if (socket5_user)
+    mysql->socket5_user = strdup(socket5_user);
+  if (socket5_pwd)
+    mysql->socket5_pwd = strdup(socket5_pwd);
+}

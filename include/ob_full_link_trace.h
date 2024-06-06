@@ -305,7 +305,7 @@ typedef struct st_fltfunc
   flt_get_serialize_size_func get_serialize_size_func;
 } FLTFunc;
 
-typedef struct st_uuid
+typedef struct st_obclient_uuid
 {
   union {
     struct {
@@ -321,8 +321,8 @@ typedef struct st_uuid
       uint8_t node[6];
     };
   };
-} UUID;
-DEFINE_TO_STRING_FUNC_FOR(UUID);
+} OBCLIENT_UUID;
+DEFINE_TO_STRING_FUNC_FOR(OBCLIENT_UUID);
 
 enum enum_flt_tagtype{
   FLT_TAG_COMMAND_NAME = 0,
@@ -342,7 +342,7 @@ DEFINE_TO_STRING_FUNC_FOR(ObTagCtx);
 typedef struct st_obspanctx
 {
   uint16_t span_type_;
-  UUID span_id_;
+  OBCLIENT_UUID span_id_;
   struct st_obspanctx *source_span_;
   my_bool is_follow_;
   int64_t start_ts_;
@@ -363,8 +363,8 @@ struct st_obtrace
   my_bool slow_query_print_;
   FLTInfo *flt;                 // point to flt struct
   uint64_t uuid_random_seed[2];
-  UUID trace_id_;
-  UUID root_span_id_;
+  OBCLIENT_UUID trace_id_;
+  OBCLIENT_UUID root_span_id_;
   LIST *current_span_list_;
   LIST *free_span_list_;
   ObSpanCtx *last_active_span_;
@@ -407,11 +407,11 @@ DEFINE_FLT_SERIALIZE_FUNC(nosupport);       // FLT_EXTRA_INFO_TYPE_END
 
 my_bool flt_is_vaild(FLTInfo *flt);
 
-int serialize_UUID(char *buf, const int64_t buf_len, int64_t* pos, UUID *uuid);
-int deserialize_UUID(const char *buf, const int64_t buf_len, int64_t *pos, UUID *uuid);
+int serialize_UUID(char *buf, const int64_t buf_len, int64_t* pos, OBCLIENT_UUID *uuid);
+int deserialize_UUID(const char *buf, const int64_t buf_len, int64_t *pos, OBCLIENT_UUID *uuid);
 
 int uuid4_init(uint64_t *seed, size_t seed_size);
-UUID uuid4_generate(uint64_t *seed);
+OBCLIENT_UUID uuid4_generate(uint64_t *seed);
 
 int flt_init(FLTInfo *flt);
 void flt_end(FLTInfo *flt);

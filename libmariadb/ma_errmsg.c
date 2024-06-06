@@ -162,6 +162,25 @@ const char *mariadb_client_errors[] =
   ""
 };
 
+const char *ob_client_errors[] = 
+{
+  /*8000*/ "The previous packet of data is still unprocessed before new command",
+  /*8001*/ "Status is not MYSQL_STATUS_GET_RESULT in mysql_store_result/mysql_use_result",
+  /*8002*/ "Status is not MYSQL_STATUS_READY in mysql_next_result",
+  /*8003*/ "State less than MYSQL_STMT_USE_OR_STORE_CALLED in stmt_cursor_fetch",
+  /*8004*/ "State less than or equal to MYSQL_STMT_EXECUTED in mysql_stmt_fetch_oracle_implicit_cursor",
+  /*8005*/ "State less than or equal to MYSQL_STMT_EXECUTED in mysql_stmt_fetch_oracle_buffered_result",
+  /*8006*/ "State is error in _mysql_stmt_use_result",
+  /*8007*/ "State less than or equal to MYSQL_STMT_EXECUTED in mysql_stmt_fetch",
+  /*8008*/ "fetch field count is zero",
+  /*8009*/ "State less than MYSQL_STMT_EXECUTED in mysql_stmt_store_result",
+  /*8010*/ "States is not MYSQL_STATUS_STMT_RESULT in mysql_stmt_store_result",
+  /*8011*/ "stmt is not prepared before mysql_stmt_execute",
+  /*8012*/ "state less than MYSQL_STMT_EXECUTED in mysql_stmt_next_result",
+  /*8013*/ "stmt is not prepared before mysql_stmt_execute_v2",
+  ""
+};
+
 const char ** NEAR my_errmsg[MAXMAPS]={0,0,0,0};
 char NEAR errbuff[NRERRBUFFS][ERRMSGSIZE];
 

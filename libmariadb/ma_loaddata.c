@@ -51,6 +51,7 @@
 #include <share.h>
 #endif
 #include <ma_common.h>
+#include <ob_protocol20.h>
 
 typedef struct st_mysql_infile_info
 {
@@ -200,6 +201,11 @@ my_bool mysql_handle_local_infile(MYSQL *conn, const char *filename, my_bool can
     mysql_set_local_infile_default(conn);
   }
 
+  //ob20 don't update requestid
+  if (conn->net.use_ob20protocol && OB_NOT_NULL(conn->net.ob20protocol)) {
+    conn->net.ob20protocol->update_request_id = 0;
+  }
+
   if (!(conn->options.client_flag & CLIENT_LOCAL_FILES) ||
       !can_local_infile)
  {
@@ -230,7 +236,7 @@ my_bool mysql_handle_local_infile(MYSQL *conn, const char *filename, my_bool can
   /* read data */
   while ((bufread= conn->options.local_infile_read(info, (char *)buf, buflen)) > 0)
   {
-    if (ma_net_write(&conn->net, (unsigned char *)buf, bufread))
+    if (ma_net_write(&conn->net, (unsigned char *)buf, bufread) || ma_net_flush(&conn->net))
     {
       my_set_error(conn, CR_SERVER_LOST, SQLSTATE_UNKNOWN, NULL);
       goto infile_error;
@@ -238,7 +244,7 @@ my_bool mysql_handle_local_infile(MYSQL *conn, const char *filename, my_bool can
   }
 
   /* send empty packet for eof */
-  if (ma_net_write(&conn->net, (unsigned char *)"", 0) || 
+  if (ma_net_write(&conn->net, (unsigned char *)"", 0) ||
       ma_net_flush(&conn->net))
   {
     my_set_error(conn, CR_SERVER_LOST, SQLSTATE_UNKNOWN, NULL);
@@ -257,6 +263,9 @@ my_bool mysql_handle_local_infile(MYSQL *conn, const char *filename, my_bool can
   result = 0;
 
 infile_error:
+  if (conn->net.use_ob20protocol && OB_NOT_NULL(conn->net.ob20protocol)) {
+    conn->net.ob20protocol->update_request_id = 1;
+  }
   conn->options.local_infile_end(info);
   free(buf);
   return(result);

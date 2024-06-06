@@ -15,6 +15,7 @@
 #include "mariadb_com.h"
 #include "ob_protocol20.h"
 #include "ob_serialize.h"
+#include "ob_utils.h"
 
 #define TYPE_LENGTH 2
 #define LEN_LENGTH 4
@@ -101,14 +102,6 @@ inline void flt_set_send_trans_flag(FLTInfo *flt, my_bool flag)
   if (OB_NOT_NULL(flt)) {
     flt->in_trans_ = flag;
   }
-}
-
-static inline int64_t get_current_time_us()
-{
-  struct timeval tv;
-  // todo: Here to be compatible with windows
-  gettimeofday(&tv, NULL);
-  return tv.tv_sec * 1000000 + tv.tv_usec;
 }
 
 static inline double flt_get_pct(uint64_t *seed)
@@ -1359,9 +1352,9 @@ int uuid4_init(uint64_t *seed, size_t seed_size) {
 }
 
 
-UUID uuid4_generate(uint64_t *seed) {
+OBCLIENT_UUID uuid4_generate(uint64_t *seed) {
   uint64_t word;
-  UUID ret;
+  OBCLIENT_UUID ret;
   /* get random */
   word = xorshift128plus(seed);
   // word[1] = xorshift128plus(seed);
@@ -1826,7 +1819,7 @@ void reset_tag(ObTrace *trace, ObSpanCtx *span, ObTagCtx *tag)
   }
 }
 
-int serialize_UUID(char *buf, const int64_t buf_len, int64_t *pos, UUID *uuid)
+int serialize_UUID(char *buf, const int64_t buf_len, int64_t *pos, OBCLIENT_UUID *uuid)
 {
   int ret = OB_SUCCESS;
   if (OB_FAIL(encode_i64(buf, buf_len, pos, uuid->high_))) {
@@ -1837,7 +1830,7 @@ int serialize_UUID(char *buf, const int64_t buf_len, int64_t *pos, UUID *uuid)
   return ret;
 }
 
-int deserialize_UUID(const char *buf, const int64_t buf_len, int64_t *pos, UUID *uuid)
+int deserialize_UUID(const char *buf, const int64_t buf_len, int64_t *pos, OBCLIENT_UUID *uuid)
 {
   int ret = OB_SUCCESS;
   if (OB_FAIL(decode_i64(buf, buf_len, pos, (int64_t *)(&uuid->high_)))) {
@@ -1848,7 +1841,7 @@ int deserialize_UUID(const char *buf, const int64_t buf_len, int64_t *pos, UUID 
   return ret;
 }
 
-DEFINE_TO_STRING_FUNC_FOR(UUID)
+DEFINE_TO_STRING_FUNC_FOR(OBCLIENT_UUID)
 {
   int ret = OB_SUCCESS;
   int64_t tmp_pos = *pos; 

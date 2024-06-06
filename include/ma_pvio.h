@@ -114,6 +114,7 @@ struct st_ma_pvio_methods
   my_bool (*is_alive)(MARIADB_PVIO *pvio);
   my_bool (*has_data)(MARIADB_PVIO *pvio, ssize_t *data_len);
   int(*shutdown)(MARIADB_PVIO *pvio);
+  int(*socket5_auth)(MARIADB_PVIO *pvio, char *user, char *pwd, char *host, unsigned short port);
 };
 
 /* Function prototypes */
@@ -135,5 +136,6 @@ my_bool ma_pvio_connect(MARIADB_PVIO *pvio, MA_PVIO_CINFO *cinfo);
 my_bool ma_pvio_is_alive(MARIADB_PVIO *pvio);
 my_bool ma_pvio_get_handle(MARIADB_PVIO *pvio, void *handle);
 my_bool ma_pvio_has_data(MARIADB_PVIO *pvio, ssize_t *length);
+int ma_pvio_socket5_auth(MARIADB_PVIO *pvio, char *user, char *pwd, char *host, unsigned short port);
 
 #endif /* _ma_pvio_h_ */

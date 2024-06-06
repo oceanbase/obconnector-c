@@ -51,7 +51,7 @@ do {\
   ma_init();\
 } while(0)
 
-#define MAXMAPS		(4)	/* Number of error message maps */
+#define MAXMAPS		(5)	/* Number of error message maps */
 #define ERRMOD		(1000)	/* Max number of errors in a map */
 #define ERRMSGSIZE	(SC_MAXWIDTH)	/* Max length of a error message */
 #define NRERRBUFFS	(2)	/* Buffers for parameters */
