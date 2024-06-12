@@ -17,8 +17,6 @@
    or write to the Free Software Foundation, Inc., 
    51 Franklin St., Fifth Floor, Boston, MA 02110, USA
 
-   Part of this code includes code from the PHP project which
-   is freely available from http://www.php.net
 *************************************************************************************/
 
 /* The hash functions used for saving keys */
@@ -150,8 +148,6 @@ static uint calc_hashnr_caseup(const uchar *key,uint length)
  * Fowler/Noll/Vo hash
  *
  * The basis of the hash algorithm was taken from an idea sent by email to the
- * IEEE Posix P1003.2 mailing list from Phong Vo (kpv@research.att.com) and
- * Glenn Fowler (gsf@research.att.com).  Landon Curt Noll (chongo@toad.com)
  * later improved on their algorithm.
  *
  * The magic is in the interesting relationship between the special prime

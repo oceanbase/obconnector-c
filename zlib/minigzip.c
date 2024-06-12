@@ -192,7 +192,7 @@ void gz_compress(in, out)
     if (gzclose(out) != Z_OK) error("failed gzclose");
 }
 
-#ifdef USE_MMAP /* MMAP version, Miguel Albrecht <malbrech@eso.org> */
+#ifdef USE_MMAP
 
 /* Try compressing the input file at once using mmap. Return Z_OK if
  * if success, Z_ERRNO otherwise.

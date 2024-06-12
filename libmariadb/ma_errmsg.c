@@ -51,7 +51,7 @@ const char *client_errors[]=
   "Got packet bigger than 'max_allowed_packet'"
 };
 
-/* Start of code added by Roberto M. Serqueira - martinsc@uol.com.br - 05.24.2001 */
+/* Start of code added by Roberto M. Serqueira - 05.24.2001 */
 
 #elif defined PORTUGUESE
 const char *client_errors[]=

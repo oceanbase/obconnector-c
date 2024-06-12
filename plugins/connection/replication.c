@@ -16,8 +16,6 @@
    or write to the Free Software Foundation, Inc., 
    51 Franklin St., Fifth Floor, Boston, MA 02110, USA
 
-   Part of this code includes code from the PHP project which
-   is freely available from http://www.php.net
 *************************************************************************************/
 
 /* MariaDB Connection plugin for load balancing  */

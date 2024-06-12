@@ -87,7 +87,6 @@ void ma_hash_password(ulong *result, const char *password, size_t len)
 
 /* scramble for 4.1 servers
  * Code based on php_nysqlnd_scramble function from PHP's mysqlnd extension,
- * written by Andrey Hristov (andrey@php.net)
  * License: PHP License 3.0
  */
 void my_crypt(unsigned char *buffer, const unsigned char *s1, const unsigned char *s2, size_t len)

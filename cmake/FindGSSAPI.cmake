@@ -13,7 +13,7 @@
 #  GSSAPI_LIBS - the libraries needed to use GSSAPI
 #  GSSAPI_FLAVOR - the type of API - MIT or HEIMDAL
 
-# Copyright (c) 2006, Pino Toscano, <toscano.pino@tiscali.it>
+# Copyright (c) 2006, Pino Toscano, 
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
