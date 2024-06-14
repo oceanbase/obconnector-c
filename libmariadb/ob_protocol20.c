@@ -331,6 +331,7 @@ int ob20_init(Ob20Protocol *ob20protocol, unsigned long conid, my_bool use_flt)
     ob20protocol->extra_info_list.current = NULL;
     ob20protocol->header.connection_id = conid;
     ob20protocol->flt = NULL;
+    ob20protocol->update_request_id = 1;
     if (use_flt) {
       ob20protocol->flt = malloc(sizeof(FLTInfo));
       if (OB_ISNULL(ob20protocol->flt)) {

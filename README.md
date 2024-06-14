@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="http://oceanbase.com/">
+  <a href="">
     <img src="https://gw.alipayobjects.com/zos/bmw-prod/d6c1a0b7-c714-4429-8a33-2b394a5c1bf1.svg">
   </a>
 </p>

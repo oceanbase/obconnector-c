@@ -464,7 +464,6 @@ end:
  * with " at " changed at "@" and " dot " changed to ".").      */
 
 /*
-  Original copy of the software is located at http://www.netlib.org/fp/dtoa.c
   It was adjusted to serve MySQL server needs:
   * strtod() was modified to not expect a zero-terminated string.
     It now honors 'se' (end of string) argument as the input parameter,

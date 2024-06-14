@@ -90,7 +90,7 @@ INCLUDE(FindCURL)
 
 IF(WITH_SIGNCODE)
   IF(WIN32 AND NOT SIGN_OPTIONS)
-    SET(SIGN_OPTIONS /a /t http://timestamp.verisign.com/scripts/timstamp.dll)
+    SET(SIGN_OPTIONS /a /t )
   ELSE()
     SEPARATE_ARGUMENTS(SIGN_OPTIONS)
   ENDIF()

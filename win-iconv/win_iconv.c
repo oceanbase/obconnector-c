@@ -412,7 +412,6 @@ static struct {
 
     /*
      * Code Page Identifiers
-     * http://msdn2.microsoft.com/en-us/library/ms776446.aspx
      */
     {37, "IBM037"}, /* IBM EBCDIC US-Canada */
     {437, "IBM437"}, /* OEM United States */
@@ -1016,9 +1015,6 @@ name_to_codepage(const char *name)
     return -1;
 }
 
-/*
- * http://www.faqs.org/rfcs/rfc2781.html
- */
 static uint
 utf16_to_ucs4(const ushort *wbuf)
 {
@@ -1199,8 +1195,6 @@ failed:
 
 /*
  * Reference:
- * http://forums.belution.com/ja/vc/000/234/78s.shtml
- * http://nienie.com/~masapico/api_ImageDirectoryEntryToData.html
  *
  * The formal way is
  *   imagehlp.h or dbghelp.h

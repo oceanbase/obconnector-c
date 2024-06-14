@@ -16,8 +16,6 @@
    Software Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
    MA 02111-1301, USA */
 
-/* Written by Sinisa Milivojevic <sinisa@coresinc.com> */
-
 #include <ma_global.h>
 #ifdef HAVE_COMPRESS
 #include <ma_sys.h>

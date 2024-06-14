@@ -27,6 +27,7 @@ extern "C" {
 void	init_client_errs(void);
 extern const char *client_errors[];	/* Error messages */
 extern const char *mariadb_client_errors[];	/* Error messages */
+extern const char *ob_client_errors[];
 #ifdef	__cplusplus
 }
 #endif
@@ -35,11 +36,14 @@ extern const char *mariadb_client_errors[];	/* Error messages */
 
 #define CR_MIN_ERROR		2000	/* For easier client code */
 #define CR_MAX_ERROR		2999
-#define CER_MIN_ERROR           5000
-#define CER_MAX_ERROR           5999
+#define CER_MIN_ERROR   5000
+#define CER_MAX_ERROR   5999
+#define OB_MIN_ERROR    8000
+#define OB_MAX_ERROR    8999
 #define CER(X) mariadb_client_errors[(X)-CER_MIN_ERROR]
 #define ER(X) client_errors[(X)-CR_MIN_ERROR]
-#define CLIENT_ERRMAP		2	/* Errormap used by ma_error() */
+#define OBER(X) ob_client_errors[(X)-OB_MIN_ERROR]
+#define CLIENT_ERRMAP		3	/* Errormap used by ma_error() */
 
 #define CR_UNKNOWN_ERROR	2000
 #define CR_SOCKET_CREATE_ERROR	2001
@@ -105,4 +109,24 @@ extern const char *mariadb_client_errors[];	/* Error messages */
 /* Always last, if you add new error codes please update the
    value for CR_MARIADB_LAST_ERROR */
 #define CR_MARIADB_LAST_ERROR CR_VERSION_MISMATCH
+
+/*
+oceanbase erros:
+*/
+#define CR_STATUS_ERROR_NOT_READY 8000
+#define CR_STATUS_ERROR_NOT_GET_RESULT 8001
+#define CR_STATES_ERROR_NEXT_RESULT 8002
+#define CR_STATUS_ERROR_CURSOR_FETCH 8003
+#define CR_STATUS_ERROR_FETCH_ORACLE_IMPLICIT_CURSOR 8004
+#define CR_STATUS_ERROR_FETCH_ORACLE_BUFFERED_RESULT 8005
+#define CR_STATUS_ERROR_STMT_USE_RESULT 8006
+#define CR_STATUS_ERROR_STMT_FETCH 8007
+#define CR_FETCH_FIELD_COUNT_IS_ZERO 8008
+#define CR_STATUS_ERROR_STORE_RESULT 8009
+#define CR_STATUS_ERROR_NOT_STMT_RESULT 8010
+#define CR_STATES_ERROR_NOT_PREPARED 8011
+#define CR_STATUS_ERROR_STMT_NEXT_RESULT 8012
+#define CR_STATES_ERROR_NOT_PREPARED_EXECUTE_V2 8013
+#define CR_OB_LAST_ERROR CR_STATES_ERROR_NOT_PREPARED_EXECUTE_V2
+
 #endif

@@ -108,6 +108,7 @@ my_bool pvio_socket_is_blocking(MARIADB_PVIO *pvio);
 my_bool pvio_socket_is_alive(MARIADB_PVIO *pvio);
 my_bool pvio_socket_has_data(MARIADB_PVIO *pvio, ssize_t *data_len);
 int pvio_socket_shutdown(MARIADB_PVIO *pvio);
+int pvio_socket_socket5_auth(MARIADB_PVIO *pvio, char *user, char *pwd, char *host, unsigned short port);
 
 static int pvio_socket_init(char *unused1, 
                            size_t unused2, 
@@ -134,7 +135,8 @@ struct st_ma_pvio_methods pvio_socket_methods= {
   pvio_socket_is_blocking,
   pvio_socket_is_alive,
   pvio_socket_has_data,
-  pvio_socket_shutdown
+  pvio_socket_shutdown,
+  pvio_socket_socket5_auth
 };
 
 #ifndef PLUGIN_DYNAMIC
@@ -1125,4 +1127,162 @@ int pvio_socket_shutdown(MARIADB_PVIO *pvio)
 #endif
   }
   return -1;
+}
+
+static int socket5_auth(int socket, char *user, char *pwd, char *host, unsigned short port) {
+#define SOCKET5_VERSION 5
+#define SOCKET5_ERROR -2
+#define ATYPE_IPV4 1
+#define ATYPE_DOMAIN 3
+#define ATYPE_IPV6 4
+
+  int len = 0;
+  char sendbuf[512] = { 0 };
+  char recvbuf[512] = { 0 };
+  int auth_success = 0;
+  int request_success = -1;
+  int support_method = -1;
+  int response_ver = -1;
+
+
+  //printf("socket:%d, user=%s, pwd=%s, host=%s, port=%d\n", socket, user ? user : "", pwd ? pwd : "", host ? host : "", port);
+
+  //shake hands
+  {
+    char *shakehands = sendbuf;
+    shakehands[0] = SOCKET5_VERSION;
+    shakehands[1] = 0x01;
+    if (user == NULL || pwd == NULL || strlen(user) == 0 || strlen(pwd) == 0) {
+      shakehands[2] = 0x00;
+    } else {
+      shakehands[2] = 0x02;
+    }
+
+    if (3 != send(socket, shakehands, 3, 0)) {
+      return SOCKET_ERROR;
+    }
+    if (2 != recv(socket, recvbuf, 2, 0)) {
+      return SOCKET_ERROR;
+    }
+    response_ver = recvbuf[0];
+    support_method = recvbuf[1];
+    //printf("shakehands ver:%d, method:%d\n", response_ver, support_method);
+  }
+
+  if (response_ver != SOCKET5_VERSION ||
+    (support_method != 0x00 && support_method != 0x02)) {
+    return SOCKET5_ERROR;
+  }
+
+  //auth user,password
+  if (support_method == 0x02) {
+    char *auth = sendbuf;
+    char *pos = auth;
+    char *puser = (char*)(user ? user : "");
+    char *ppwd = (char*)(pwd ? pwd : "");
+    *pos++ = SOCKET5_VERSION;
+    *pos++ = (unsigned char)strlen(puser);
+    memcpy(pos, puser, strlen(puser));
+    pos += strlen(puser);
+    *pos++ = (unsigned char)strlen(ppwd);
+    memcpy(pos, ppwd, strlen(ppwd));
+    pos += strlen(ppwd);
+
+    len = 3 + strlen(puser) + strlen(ppwd);
+    if (len != send(socket, auth, len, 0)) {
+      return SOCKET_ERROR;
+    }
+    if (2 != recv(socket, recvbuf, 2, 0)) {
+      return SOCKET_ERROR;
+    }
+    response_ver = recvbuf[0];
+    auth_success = recvbuf[1];
+    //printf("auth ver:%d, status:%d\n", recvbuf[0], recvbuf[1]);
+  }
+
+  if (response_ver != SOCKET5_VERSION || auth_success != 0) {
+    return SOCKET5_ERROR;
+  }
+
+  //request
+  if (0 == auth_success) {
+    char* request = sendbuf;
+    char *pos = request;
+    char atyp = 0;
+    if (strchr(host, ':')) {
+      atyp = ATYPE_IPV6;
+    } else {
+      int i = 0;
+      bool domain = 0;
+      for (i = 0; i < (int)strlen(host); i++) {
+        if ((host[i] >= '0' &&host[i] <= '9') || host[i] == '.') {
+          continue;
+        } else {
+          domain = 1;
+          break;
+        }
+      }
+      atyp = domain ? ATYPE_DOMAIN : ATYPE_IPV4;
+    }
+    *pos++ = SOCKET5_VERSION;
+    *pos++ = 0x01; //1=connect,2=bind,3=udp, default connect
+    *pos++ = 0x00;
+    *pos++ = atyp; //1=ipv4 (4),3=domain,4=ipv6(16)
+    if (atyp == ATYPE_IPV4) {  //ipv4
+      unsigned int *addr = (unsigned int*)pos;
+      *addr = inet_addr(host);
+      pos += 4;
+    } else if (atyp == ATYPE_DOMAIN) { //domain
+      *pos++ = (unsigned char)strlen(host);
+      memcpy(pos, host, strlen(host));
+      pos += strlen(host);
+    } else {  //ipv6
+      if (1 != inet_pton(AF_INET6, host, pos)) {
+        return SOCKET5_ERROR;
+      }
+      pos += 16;
+    }
+    unsigned short *pport = (unsigned short*)pos;
+    *pport = htons(port);
+    pos += 2;
+
+    len = pos - request;
+    if (len != send(socket, request, len, 0)) {
+      return SOCKET_ERROR;
+    }
+    if (4 != recv(socket, recvbuf, 4, 0)) {
+      return SOCKET_ERROR;
+    }
+    response_ver = recvbuf[0];
+    request_success = recvbuf[1];
+    //printf("request recv:ver=%d, rep=%d, atyp=%d\n", recvbuf[0], recvbuf[1], recvbuf[3]);
+
+    {
+      int will = 2;  //port
+      if (recvbuf[3] == ATYPE_IPV4) {  //ipv4
+        will += 4;
+      } else if (recvbuf[3] = ATYPE_DOMAIN) {  //domain
+        if (1 != recv(socket, recvbuf, 1, 0))
+          return SOCKET_ERROR;
+        will += recvbuf[0];
+      } else {  //ipv6
+        will += 16;
+      }
+      if (will != recv(socket, recvbuf, will, 0)) {
+        return SOCKET_ERROR;
+      }
+    }
+  }
+  return request_success;
+}
+int pvio_socket_socket5_auth(MARIADB_PVIO *pvio, char *user, char *pwd, char *host, unsigned short port)
+{
+  struct st_pvio_socket *csock = NULL;
+  int ret = 0;
+
+  if (!pvio || !pvio->data)
+    return -1;
+
+  csock = (struct st_pvio_socket *)pvio->data;
+  return socket5_auth(csock->socket, user, pwd, host, port);
 }

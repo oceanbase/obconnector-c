@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+<Wix xmlns="">
   <Product Id="*" Name="@PRODUCT_NAME@" Language="1033" 
     Version="@PRODUCT_VERSION@"
     Manufacturer="@PRODUCT_MANUFACTURER@" UpgradeCode="@PRODUCT_UPGRADE_CODE@">

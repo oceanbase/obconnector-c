@@ -17,7 +17,6 @@
 
    Part of this code includes code from PHP's mysqlnd extension
    (written by Andrey Hristov, Georg Richter and Ulf Wendel), freely
-   available from http://www.php.net/software
 
 *************************************************************************/
 

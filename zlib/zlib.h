@@ -20,7 +20,6 @@
   3. This notice may not be removed or altered from any source distribution.
 
   Jean-loup Gailly        Mark Adler
-  jloup@gzip.org          madler@alumni.caltech.edu
 
 
   The data format used by the zlib library is described by RFCs (Request for

@@ -2,10 +2,8 @@
  * Copyright (C) 2015 - 2018 MariaDB Corporation AB
  * Copyright (c) 2003 Simtec Electronics
  *
- * Re-implemented by Vincent Sanders <vince@kyllikki.org> with extensive
  * reference to original curl example code
  *
- * Rewritten for MariaDB Connector/C by Georg Richter <georg@mariadb.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions

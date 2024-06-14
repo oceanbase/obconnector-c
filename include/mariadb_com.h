@@ -17,8 +17,6 @@
    or write to the Free Software Foundation, Inc., 
    51 Franklin St., Fifth Floor, Boston, MA 02110, USA
 
-   Part of this code includes code from the PHP project which
-   is freely available from http://www.php.net
 *************************************************************************************/
 
 /*
@@ -381,7 +379,9 @@ enum ObCapabilityFlagShift
   OBCLIENT_CAP_PROXY_NEW_EXTRA_INFO_SHIFT,
   OBCLIENT_CAP_PROXY_SESSION_VAR_SYNC_SHIFT,
   OBCLIENT_CAP_PROXY_WEAK_STALE_FEEDBACK_SHIFT,
-  OBCLIENT_CAP_PROXY_FULL_LINK_TRACE_SHOW_TRACE_SHIFT
+  OBCLIENT_CAP_PROXY_FULL_LINK_TRACE_SHOW_TRACE_SHIFT,
+  OBCLIENT_CAP_SERVER_DUP_SESS_INFO_SYNC_SHIFT,
+  OBCLIENT_CAP_PROXY_LOCAL_INFILES_SHIFT
 };
 
 #define OBCLIENT_TEST_CAPABILITY(cap, tg_cap) (((cap) & (tg_cap)) == (tg_cap))
@@ -403,6 +403,7 @@ enum ObCapabilityFlagShift
 #define OBCLIENT_CAP_PROXY_SESSION_VAR_SYNC           OBCLIENT_CAP_GET_TYPE(OBCLIENT_CAP_PROXY_SESSION_VAR_SYNC_SHIFT)
 #define OBCLIENT_CAP_PROXY_WEAK_STALE_FEEDBACK        OBCLIENT_CAP_GET_TYPE(OBCLIENT_CAP_PROXY_WEAK_STALE_FEEDBACK_SHIFT)
 #define OBCLIENT_CAP_PROXY_FULL_LINK_TRACE_SHOW_TRACE OBCLIENT_CAP_GET_TYPE(OBCLIENT_CAP_PROXY_FULL_LINK_TRACE_SHOW_TRACE_SHIFT)
+#define OBCLIENT_CAP_PROXY_LOCAL_INFILES              OBCLIENT_CAP_GET_TYPE(OBCLIENT_CAP_PROXY_LOCAL_INFILES_SHIFT)
 
 static const unsigned long OBPROXY_DEFAULT_CAPABILITY_FLAG =
     (OBCLIENT_CAP_OB_PROTOCOL_V2
@@ -419,6 +420,9 @@ static const char *const OB_MYSQL_CAPABILITY_FLAG = "__proxy_capability_flag";
 static const char *const OB_MYSQL_CLIENT_MODE = "__mysql_client_type";
 static const char *const OB_MYSQL_CLIENT_OBPROXY_MODE = "__ob_proxy";
 static const char *const OB_MYSQL_CONNECTION_ID = "__connection_id";
+static const char *const OB_MYSQL_CLIENT_NAME_KEY = "__ob_client_name";
+static const char *const OB_MYSQL_CLIENT_NAME_VALUE = "OceanBase Connector/C";
+static const char *const OB_MYSQL_CLIENT_VERSION_KEY = "__ob_client_version";
 static const char *const OB_MYSQL_PROXY_CONNECTION_ID = "__proxy_connection_id";
 static const char *const OB_MYSQL_GLOBAL_VARS_VERSION = "__global_vars_version";
 
@@ -437,6 +441,7 @@ enum ObCapabilityFlagLob
 static const unsigned long OBCLIENT_CAP_OB_LOB_LOCATOR_V2_FLAG = OBCLIENT_CAP_OB_LOB_LOCATOR_V2;
 static const char *const OB_MYSQL_LOB_LOCATOR_V2 = "__ob_client_attribute_capability_flag";
 
+static const char *const OB_MYSQL_PROXY_USER_NAME = "__ob_client_proxy_user_name";
 
 typedef enum enum_field_types { MYSQL_TYPE_DECIMAL, MYSQL_TYPE_TINY,
                         MYSQL_TYPE_SHORT,  MYSQL_TYPE_LONG,

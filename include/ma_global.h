@@ -1115,8 +1115,16 @@ typedef unsigned long long intptr;
 #define OB_ERROR  -4000
 #define UNUSED(x) (void)x
 
-#define OB_LIKELY(x)       __builtin_expect(!!(x),1)
-#define OB_UNLIKELY(x)     __builtin_expect(!!(x),0)
+#ifdef _WIN32
+  #define OB_LIKELY(x)       (x)
+  #define OB_UNLIKELY(x)     (x)
+  #define __UINT64_C(c)   c ## ULL
+  #define __INT64_C(c)    c ## LL
+#else
+  #define OB_LIKELY(x)       __builtin_expect(!!(x),1)
+  #define OB_UNLIKELY(x)     __builtin_expect(!!(x),0)
+#endif
+
 #define OB_ISNULL(statement) (OB_UNLIKELY(NULL == (statement)))
 #define OB_NOT_NULL(statement) (OB_LIKELY(NULL != (statement)))
 

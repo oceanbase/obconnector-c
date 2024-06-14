@@ -1,5 +1,4 @@
 #
-#  Copyright (C) 2010  Michael Bell <michael.bell@web.de>
 #                2015-2016 MariaDB Corporation AB
 #
 #  Redistribution and use is allowed according to the terms of the New

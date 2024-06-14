@@ -17,7 +17,6 @@
 
    Part of this code includes code from PHP's mysqlnd extension
    (written by Andrey Hristov, Georg Richter and Ulf Wendel), freely
-   available from http://www.php.net/software
 
 *************************************************************************/
 
@@ -25,7 +24,7 @@
 
 #ifdef _WIN32
 #include <time.h>
-
+#include <limits.h>
 union ft64 {
   FILETIME ft;
   __int64 i64;

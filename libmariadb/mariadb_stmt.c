@@ -16,8 +16,6 @@
   or write to the Free Software Foundation, Inc.,
   51 Franklin St., Fifth Floor, Boston, MA 02110, USA
 
-  Part of this code includes code from the PHP project which
-  is freely available from http://www.php.net
  *****************************************************************************/
 
 /* The implementation for prepared statements was ported from PHP's mysqlnd
@@ -32,14 +30,13 @@
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
    | available through the world-wide-web at the following url:           |
-   | http://www.php.net/license/3_01.txt                                  |
    | If you did not receive a copy of the PHP license and are unable to   |
    | obtain it through the world-wide-web, please send a note to          |
-   | license@php.net so we can mail you a copy immediately.               |
+   |                 so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
-   | Authors: Georg Richter <georg@mysql.com>                             |
-   |          Andrey Hristov <andrey@mysql.com>                           |
-   |          Ulf Wendel <uwendel@mysql.com>                              |
+   | Authors: Georg Richter <               >                             |
+   |          Andrey Hristov <                >                           |
+   |          Ulf Wendel <                 >                              |
    +----------------------------------------------------------------------+
    */
 
@@ -116,6 +113,8 @@ void stmt_set_error(MYSQL_STMT *stmt,
     error= ER(error_nr);
   else if (error_nr >= CER_MIN_ERROR && error_nr <= CR_MARIADB_LAST_ERROR)
     error= CER(error_nr);
+  else if (error_nr >=OB_MIN_ERROR && error_nr <=CR_OB_LAST_ERROR)
+    error = OBER(error_nr);
 
   stmt->last_errno= error_nr;
   ma_strmake(stmt->sqlstate, sqlstate, SQLSTATE_LENGTH);
@@ -211,7 +210,13 @@ static int stmt_unbuffered_fetch(MYSQL_STMT *stmt, uchar **row)
 
   if (stmt->mysql->net.read_pos[0] == 254)
   {
+    //EOF, update server_status
+    char *p = stmt->mysql->net.read_pos;
     *row = NULL;
+    p++;
+    stmt->upsert_status.warning_count = stmt->mysql->warning_count = uint2korr(p);
+    p += 2;
+    stmt->upsert_status.server_status = stmt->mysql->server_status = uint2korr(p);
     stmt->fetch_row_func= stmt_unbuffered_eof;
     return(MYSQL_NO_DATA);
   }
@@ -347,7 +352,8 @@ static int stmt_cursor_fetch(MYSQL_STMT *stmt, uchar **row)
   int back_status = 0;
   if (stmt->state < MYSQL_STMT_USE_OR_STORE_CALLED)
   {
-    SET_CLIENT_STMT_ERROR(stmt, CR_COMMANDS_OUT_OF_SYNC, SQLSTATE_UNKNOWN, 0);
+    //SET_CLIENT_STMT_ERROR(stmt, CR_COMMANDS_OUT_OF_SYNC, SQLSTATE_UNKNOWN, 0);
+    SET_OB_CLIENT_STMT_ERROR(stmt, CR_STATUS_ERROR_CURSOR_FETCH, SQLSTATE_UNKNOWN, 0);
     return(1);
   }
   if (stmt->mysql == NULL)
@@ -744,7 +750,8 @@ int STDCALL mysql_stmt_fetch_oracle_implicit_cursor(MYSQL_STMT *stmt, my_bool is
   int rc = 0;
   if (stmt->state <= MYSQL_STMT_EXECUTED)
   {
-    SET_CLIENT_STMT_ERROR(stmt, CR_COMMANDS_OUT_OF_SYNC, SQLSTATE_UNKNOWN, 0);
+    //SET_CLIENT_STMT_ERROR(stmt, CR_COMMANDS_OUT_OF_SYNC, SQLSTATE_UNKNOWN, 0);
+    SET_OB_CLIENT_STMT_ERROR(stmt, CR_STATUS_ERROR_FETCH_ORACLE_IMPLICIT_CURSOR, SQLSTATE_UNKNOWN, 0);
     return(1);
   }
   if ((rc = do_stmt_read_row_from_oracle_implicit_cursor(stmt, &row, is_need_fetch_from_server)))
@@ -767,7 +774,8 @@ int STDCALL mysql_stmt_fetch_oracle_buffered_result(MYSQL_STMT *stmt)
   int rc = 0;
   if (stmt->state <= MYSQL_STMT_EXECUTED)
   {
-    SET_CLIENT_STMT_ERROR(stmt, CR_COMMANDS_OUT_OF_SYNC, SQLSTATE_UNKNOWN, 0);
+    //SET_CLIENT_STMT_ERROR(stmt, CR_COMMANDS_OUT_OF_SYNC, SQLSTATE_UNKNOWN, 0);
+    SET_OB_CLIENT_STMT_ERROR(stmt, CR_STATUS_ERROR_FETCH_ORACLE_BUFFERED_RESULT, SQLSTATE_UNKNOWN, 0);
     return(1);
   }
   /* just read the buffered result for some situation, not to fetch the result from ObServer any more */
@@ -804,9 +812,9 @@ void mthd_stmt_flush_unbuffered(MYSQL_STMT *stmt)
     }
     if (packet_len < 8 && *pos == 254) /* EOF */
     {
+      stmt->mysql->server_status = uint2korr(pos + 3);
       if (mariadb_connection(stmt->mysql))
       {
-        stmt->mysql->server_status= uint2korr(pos + 3);
         if (in_resultset)
           goto end;
         in_resultset= 1;
@@ -899,7 +907,8 @@ MYSQL_RES *_mysql_stmt_use_result(MYSQL_STMT *stmt)
       (stmt->cursor_exists && mysql->status != MYSQL_STATUS_READY) ||
       (stmt->state != MYSQL_STMT_WAITING_USE_OR_STORE))
   {
-    SET_CLIENT_ERROR(mysql, CR_COMMANDS_OUT_OF_SYNC, SQLSTATE_UNKNOWN, 0);
+    //SET_CLIENT_ERROR(mysql, CR_COMMANDS_OUT_OF_SYNC, SQLSTATE_UNKNOWN, 0);
+    SET_OB_CLIENT_ERROR(mysql, CR_STATUS_ERROR_STMT_USE_RESULT, SQLSTATE_UNKNOWN, 0);
     return(NULL);
   }
 
@@ -2935,13 +2944,15 @@ int STDCALL mysql_stmt_fetch(MYSQL_STMT *stmt)
 
   if (stmt->state <= MYSQL_STMT_EXECUTED)
   {
-    SET_CLIENT_STMT_ERROR(stmt, CR_COMMANDS_OUT_OF_SYNC, SQLSTATE_UNKNOWN, 0);
+    //SET_CLIENT_STMT_ERROR(stmt, CR_COMMANDS_OUT_OF_SYNC, SQLSTATE_UNKNOWN, 0);
+    SET_OB_CLIENT_STMT_ERROR(stmt, CR_STATUS_ERROR_STMT_FETCH, SQLSTATE_UNKNOWN, 0);
     return(1);
   }
 
   if (stmt->state < MYSQL_STMT_WAITING_USE_OR_STORE || !stmt->field_count)
   {
-    SET_CLIENT_STMT_ERROR(stmt, CR_COMMANDS_OUT_OF_SYNC, SQLSTATE_UNKNOWN, 0);
+    //SET_CLIENT_STMT_ERROR(stmt, CR_COMMANDS_OUT_OF_SYNC, SQLSTATE_UNKNOWN, 0);
+    SET_OB_CLIENT_STMT_ERROR(stmt, CR_FETCH_FIELD_COUNT_IS_ZERO, SQLSTATE_UNKNOWN, 0);
     return(1);
   } else if (stmt->state== MYSQL_STMT_WAITING_USE_OR_STORE)
   {
@@ -3276,8 +3287,10 @@ int STDCALL mysql_stmt_store_result(MYSQL_STMT *stmt)
 
   if (stmt->state < MYSQL_STMT_EXECUTED)
   {
-    SET_CLIENT_ERROR(stmt->mysql, CR_COMMANDS_OUT_OF_SYNC, SQLSTATE_UNKNOWN, 0);
-    SET_CLIENT_STMT_ERROR(stmt, CR_COMMANDS_OUT_OF_SYNC, SQLSTATE_UNKNOWN, 0);
+    //SET_CLIENT_ERROR(stmt->mysql, CR_COMMANDS_OUT_OF_SYNC, SQLSTATE_UNKNOWN, 0);
+    //SET_CLIENT_STMT_ERROR(stmt, CR_COMMANDS_OUT_OF_SYNC, SQLSTATE_UNKNOWN, 0);
+    SET_OB_CLIENT_ERROR(stmt->mysql, CR_STATUS_ERROR_STORE_RESULT, SQLSTATE_UNKNOWN, 0);
+    SET_OB_CLIENT_STMT_ERROR(stmt, CR_STATUS_ERROR_STORE_RESULT, SQLSTATE_UNKNOWN, 0);
     return(1);
   }
 
@@ -3299,8 +3312,10 @@ int STDCALL mysql_stmt_store_result(MYSQL_STMT *stmt)
   }
   else if (stmt->mysql->status != MYSQL_STATUS_STMT_RESULT)
   {
-    SET_CLIENT_ERROR(stmt->mysql, CR_COMMANDS_OUT_OF_SYNC, SQLSTATE_UNKNOWN, 0);
-    SET_CLIENT_STMT_ERROR(stmt, CR_COMMANDS_OUT_OF_SYNC, SQLSTATE_UNKNOWN, 0);
+    //SET_CLIENT_ERROR(stmt->mysql, CR_COMMANDS_OUT_OF_SYNC, SQLSTATE_UNKNOWN, 0);
+    //SET_CLIENT_STMT_ERROR(stmt, CR_COMMANDS_OUT_OF_SYNC, SQLSTATE_UNKNOWN, 0);
+    SET_OB_CLIENT_ERROR(stmt->mysql, CR_STATUS_ERROR_NOT_STMT_RESULT, SQLSTATE_UNKNOWN, 0);
+    SET_OB_CLIENT_STMT_ERROR(stmt, CR_STATUS_ERROR_NOT_STMT_RESULT, SQLSTATE_UNKNOWN, 0);
     return(1);
   }
 
@@ -3632,8 +3647,8 @@ my_bool cli_read_piece_result(MYSQL_STMT *stmt)
 int STDCALL mysql_stmt_execute(MYSQL_STMT *stmt)
 {
   MYSQL *mysql= stmt->mysql;
-  char *request;
-  int ret;
+  char *request = NULL;
+  int ret = 0;
   size_t request_len= 0;
   FLT_DECLARE;
 
@@ -3645,8 +3660,10 @@ int STDCALL mysql_stmt_execute(MYSQL_STMT *stmt)
 
   if (stmt->state < MYSQL_STMT_PREPARED)
   {
-    SET_CLIENT_ERROR(mysql, CR_COMMANDS_OUT_OF_SYNC, SQLSTATE_UNKNOWN, 0);
-    SET_CLIENT_STMT_ERROR(stmt, CR_COMMANDS_OUT_OF_SYNC, SQLSTATE_UNKNOWN, 0);
+    //SET_CLIENT_ERROR(mysql, CR_COMMANDS_OUT_OF_SYNC, SQLSTATE_UNKNOWN, 0);
+    //SET_CLIENT_STMT_ERROR(stmt, CR_COMMANDS_OUT_OF_SYNC, SQLSTATE_UNKNOWN, 0);
+    SET_OB_CLIENT_ERROR(mysql, CR_STATES_ERROR_NOT_PREPARED, SQLSTATE_UNKNOWN, 0);
+    SET_OB_CLIENT_STMT_ERROR(stmt, CR_STATES_ERROR_NOT_PREPARED, SQLSTATE_UNKNOWN, 0);
     return(1);
   }
 
@@ -4064,6 +4081,7 @@ static ulong calculate_param_object_type_len(MYSQL *mysql, MYSQL_COMPLEX_BIND_OB
 static ulong calculate_param_array_type_len(MYSQL *mysql, MYSQL_COMPLEX_BIND_ARRAY *param)
 {
   ulong len;
+  MYSQL_COMPLEX_BIND_OBJECT *param_tmp = (MYSQL_COMPLEX_BIND_OBJECT *)param;
   MYSQL_COMPLEX_BIND_HEADER *header = (MYSQL_COMPLEX_BIND_HEADER *)param->buffer;
 
   //shcema_name
@@ -4073,15 +4091,19 @@ static ulong calculate_param_array_type_len(MYSQL *mysql, MYSQL_COMPLEX_BIND_ARR
 
   //elem_type
   len += 1;
-  if (MYSQL_TYPE_OBJECT == header->buffer_type) {
-    MYSQL_COMPLEX_BIND_OBJECT sub_header;
-    sub_header.owner_name = ((MYSQL_COMPLEX_BIND_OBJECT*)header)->owner_name;
-    sub_header.type_name = ((MYSQL_COMPLEX_BIND_OBJECT*)header)->type_name;
-    len += calculate_param_object_type_len(mysql, &sub_header);
-  } else if (MYSQL_TYPE_ARRAY == header->buffer_type) {
-    MYSQL_COMPLEX_BIND_ARRAY sub_header;
-    sub_header.buffer = header->buffer;
-    len += calculate_param_array_type_len(mysql, &sub_header);
+  
+  //elem length may be zero
+  if (param_tmp->length > 0) {
+    if (MYSQL_TYPE_OBJECT == header->buffer_type) {
+      MYSQL_COMPLEX_BIND_OBJECT sub_header;
+      sub_header.owner_name = ((MYSQL_COMPLEX_BIND_OBJECT*)header)->owner_name;
+      sub_header.type_name = ((MYSQL_COMPLEX_BIND_OBJECT*)header)->type_name;
+      len += calculate_param_object_type_len(mysql, &sub_header);
+    } else if (MYSQL_TYPE_ARRAY == header->buffer_type) {
+      MYSQL_COMPLEX_BIND_ARRAY sub_header;
+      sub_header.buffer = header->buffer;
+      len += calculate_param_array_type_len(mysql, &sub_header);
+    }
   }
 
   return len;
@@ -4125,8 +4147,10 @@ int STDCALL mysql_stmt_next_result(MYSQL_STMT *stmt)
 
   if (stmt->state < MYSQL_STMT_EXECUTED)
   {
-    SET_CLIENT_ERROR(stmt->mysql, CR_COMMANDS_OUT_OF_SYNC, SQLSTATE_UNKNOWN, 0);
-    SET_CLIENT_STMT_ERROR(stmt, CR_COMMANDS_OUT_OF_SYNC, SQLSTATE_UNKNOWN, 0);
+    //SET_CLIENT_ERROR(stmt->mysql, CR_COMMANDS_OUT_OF_SYNC, SQLSTATE_UNKNOWN, 0);
+    //SET_CLIENT_STMT_ERROR(stmt, CR_COMMANDS_OUT_OF_SYNC, SQLSTATE_UNKNOWN, 0);
+    SET_OB_CLIENT_ERROR(stmt->mysql, CR_STATUS_ERROR_STMT_NEXT_RESULT, SQLSTATE_UNKNOWN, 0);
+    SET_OB_CLIENT_STMT_ERROR(stmt, CR_STATUS_ERROR_STMT_NEXT_RESULT, SQLSTATE_UNKNOWN, 0);
     return(1);
   }
 
@@ -4841,6 +4865,37 @@ my_bool get_use_ob_client_lob_locatorv2(MYSQL *mysql)
   return FALSE;
 }
 
+
+my_bool determine_load_infiles(MYSQL *mysql)
+{
+  my_bool bret = TRUE;
+  int ival = LOAD_INFILES_AUTO_OPEN; //default is AUTO
+  int tmp_val = 0;
+  char* env = getenv("ENABLE_LOAD_INFILES");
+  if (env) {
+    tmp_val = atoi(env);
+    if (tmp_val >= 0 && tmp_val < LOAD_INFILES_FLAY_MAX) {
+      ival = tmp_val;
+    }
+  }
+  if (ival == LOAD_INFILES_FORCE_OPEN) {
+    bret = TRUE;
+  } else if (ival == LOAD_INFILES_FORCE_CLOSE) {
+    bret = FALSE;
+  }
+  if (mysql) {
+    mysql->can_use_load_infiles = bret;
+  }
+  DBUG_RETURN(bret);
+}
+my_bool get_use_load_infiles(MYSQL *mysql)
+{
+  if (mysql) {
+    return mysql->can_use_load_infiles;
+  }
+  return FALSE;
+}
+
 uint8_t get_ob_lob_locator_version(void *lob)
 {
   uint8_t ver = 0;
@@ -4875,7 +4930,7 @@ int64_t get_ob_lob_payload_data_len(void *lob)
         int tmp_len = tmp->extern_header.payload_offset_+ tmp->extern_header.payload_size_;
         char *tmp_buf = tmp->data_;
         uint16_t ex_size = uint2korr(tmp_buf);
-        int offset = MAX_OB_LOB_LOCATOR_HEADER_LENGTH + sizeof(uint16) + ex_size + tmp->extern_header.rowkey_size_ + sizeof(ObClientLobCommon) + sizeof(ObClientLobData);
+        int offset = sizeof(uint16) + ex_size + tmp->extern_header.rowkey_size_ + sizeof(ObClientLobCommon) + sizeof(ObClientLobData);
         if (tmp_len > offset) {
           len = uint8korr(tmp_buf + offset - 8);
         }
@@ -4908,10 +4963,10 @@ int prepare_execute_v2(MYSQL *mysql, MYSQL_STMT* stmt, const char* query, MYSQL_
   }
   return ret;
 }
-int stmt_get_data_from_lobv2( MYSQL *mysql, void * lob, enum_field_types type, 
-  int64_t char_offset, int64_t byte_offset, int64_t char_len, int64_t byte_len, char *buf, const int64_t buf_len, int64_t *data_len, int64_t *act_len)
+int get_lob_data(MYSQL *mysql, void* lob, enum_field_types type,
+  int64_t offset, int64_t* char_len, int64_t* byte_len, char *buf, const int64_t buf_len)
 {
-  int ret = -1;
+  int ret = 0;
   const char *read_sql = "call DBMS_LOB.read(?, ?, ?, ?)";
   MYSQL_BIND param_bind[4];
   MYSQL_BIND param_res[2];
@@ -4919,29 +4974,97 @@ int stmt_get_data_from_lobv2( MYSQL *mysql, void * lob, enum_field_types type,
   int64_t length = 0;
   OB_LOB_LOCATOR_V2 *loblocator = (OB_LOB_LOCATOR_V2*)lob;
 
+  memset(param_bind, 0, sizeof(param_bind));
+  param_bind[0].buffer = lob;
+  param_bind[0].buffer_length = loblocator->extern_header.payload_size_ + loblocator->extern_header.payload_offset_ + MAX_OB_LOB_LOCATOR_HEADER_LENGTH;
+  param_bind[0].buffer_type = type;
+  param_bind[1].buffer = (char *)byte_len;
+  param_bind[1].buffer_type = MYSQL_TYPE_LONGLONG;
+  param_bind[2].buffer = (char *)&offset;
+  param_bind[2].buffer_type = MYSQL_TYPE_LONGLONG;
+  param_bind[3].is_null = &param_bind[3].is_null_value;
+  *param_bind[3].is_null = 1;
+  if (MYSQL_TYPE_ORA_CLOB == type) {
+    param_bind[3].buffer_type = MYSQL_TYPE_VAR_STRING;
+  } else {
+    param_bind[3].buffer_type = MYSQL_TYPE_OB_RAW;
+  }
+
+  //result
+  memset(param_res, 0, sizeof(param_res));
+  param_res[0].error = &param_res[0].error_value;
+  param_res[0].is_null = &param_res[0].is_null_value;
+  param_res[0].buffer = &length;
+  param_res[0].buffer_type = MYSQL_TYPE_LONGLONG;
+  param_res[1].error = &param_res[1].error_value;
+  param_res[1].is_null = &param_res[1].is_null_value;
+  param_res[1].length = &param_res[1].length_value;
+  param_res[1].buffer = buf;
+  param_res[1].buffer_length = buf_len;
+  if (MYSQL_TYPE_ORA_CLOB == type) {
+    param_res[1].buffer_type = MYSQL_TYPE_VAR_STRING;
+  } else {
+    param_res[1].buffer_type = MYSQL_TYPE_OB_RAW;
+  }
+
+  if (NULL == (stmt = mysql_stmt_init(mysql))) {
+    ret = -1;
+  } else if (prepare_execute_v2(mysql, stmt, read_sql, param_bind)) {
+    ret = -1;
+  } else if (mysql_stmt_bind_result(stmt, param_res)) {
+    ret = -1;
+  } else {
+    int64_t data_len = 0;
+    ret = mysql_stmt_fetch(stmt);
+    if (0 == ret) {
+      *byte_len = param_res[1].length_value;
+      *char_len = length;
+    } else if (MYSQL_DATA_TRUNCATED == ret) {
+      *byte_len = param_res[1].length_value;
+      *char_len = length;
+      ret = 0;
+    } else {
+      ret = -1;
+    }
+    if (NULL != stmt) {
+      mysql_stmt_close(stmt);
+    }
+  }
+  return ret;
+}
+int stmt_get_data_from_lobv2( MYSQL *mysql, void * lob, enum_field_types type, 
+  int64_t char_offset, int64_t byte_offset, int64_t char_len, int64_t byte_len, char *buf, const int64_t buf_len, int64_t *data_len, int64_t *act_len)
+{
+#define DBMS_LOB_MAX_LENGTH 32766
+  int ret = -1;
+  int64_t length = 0;
+  OB_LOB_LOCATOR_V2 *loblocator = (OB_LOB_LOCATOR_V2*)lob;
+
   char_offset = char_offset;
   char_len = char_len;
 
   if (!mysql) {
-    SET_CLIENT_STMT_ERROR(stmt, CR_SERVER_LOST, unknown_sqlstate, NULL);
+    SET_CLIENT_ERROR(mysql, CR_SERVER_LOST, unknown_sqlstate, NULL);
     DBUG_RETURN(1);
   }
   if (NULL == lob) {
-    SET_CLIENT_STMT_ERROR(stmt, CR_UNKNOWN_ERROR, unknown_sqlstate, NULL);
+    SET_CLIENT_ERROR(mysql, CR_UNKNOWN_ERROR, unknown_sqlstate, NULL);
     DBUG_RETURN(1);
   }
   if (OBCLIENT_LOB_LOCATORV2 != get_ob_lob_locator_version(lob)) {
-    SET_CLIENT_STMT_ERROR(stmt, CR_UNKNOWN_ERROR, unknown_sqlstate, NULL);
+    SET_CLIENT_ERROR(mysql, CR_UNKNOWN_ERROR, unknown_sqlstate, NULL);
     DBUG_RETURN(1);
   }
   if (type != MYSQL_TYPE_ORA_CLOB && type != MYSQL_TYPE_ORA_BLOB) {
-    SET_CLIENT_STMT_ERROR(stmt, CR_UNKNOWN_ERROR, unknown_sqlstate, NULL);
+    SET_CLIENT_ERROR(mysql, CR_UNKNOWN_ERROR, unknown_sqlstate, NULL);
     DBUG_RETURN(1);
   }
   if (1 != loblocator->common.has_extern) {
-    SET_CLIENT_STMT_ERROR(stmt, CR_UNKNOWN_ERROR, unknown_sqlstate, NULL);
+    SET_CLIENT_ERROR(mysql, CR_UNKNOWN_ERROR, unknown_sqlstate, NULL);
     DBUG_RETURN(1);
   }
+
+  *act_len = get_ob_lob_payload_data_len(loblocator);
 
   if (1 == loblocator->common.is_inrow_) {
     length = byte_len > buf_len ? buf_len : byte_len;
@@ -4953,106 +5076,46 @@ int stmt_get_data_from_lobv2( MYSQL *mysql, void * lob, enum_field_types type,
       *act_len = loblocator->extern_header.payload_size_;
     ret = 0;
   } else {
-    int64_t tmp_len = byte_len + 1;
-    char *tmp_buf = calloc(1, byte_len);
-    if (NULL != tmp_buf) {
-      //params
-      memset(param_bind, 0, sizeof(param_bind));
-      param_bind[0].buffer = lob;
-      param_bind[0].buffer_length = loblocator->extern_header.payload_size_ + loblocator->extern_header.payload_offset_ + MAX_OB_LOB_LOCATOR_HEADER_LENGTH;
-      param_bind[0].buffer_type = type;
-      param_bind[1].buffer = (char *)&tmp_len;
-      param_bind[1].buffer_type = MYSQL_TYPE_LONGLONG;
-      param_bind[2].buffer = (char *)&byte_offset;
-      param_bind[2].buffer_type = MYSQL_TYPE_LONGLONG;
-      param_bind[3].is_null = &param_bind[3].is_null_value;
-      *param_bind[3].is_null = 1;
-      if (MYSQL_TYPE_ORA_CLOB == type) {
-        param_bind[3].buffer_type = MYSQL_TYPE_VAR_STRING;
+    char *pdata = buf;
+    int64_t amtp = 0;
+    int64_t read_len = 0;
+    int64_t char_len;
+    int64_t buf_use = 0;
+
+    do {
+      if (byte_len - amtp > DBMS_LOB_MAX_LENGTH) {
+        read_len = DBMS_LOB_MAX_LENGTH;
+      } else if (byte_len - amtp > 0) {
+        read_len = (byte_len - amtp);
       } else {
-        param_bind[3].buffer_type = MYSQL_TYPE_OB_RAW;
+        ret = 0;
+        break;
       }
 
-      //result
-      memset(param_res, 0, sizeof(param_res));
-      param_res[0].error = &param_res[0].error_value;
-      param_res[0].is_null = &param_res[0].is_null_value;
-      param_res[0].buffer = &length;
-      param_res[0].buffer_type = MYSQL_TYPE_LONGLONG;
-      param_res[1].error = &param_res[1].error_value;
-      param_res[1].is_null = &param_res[1].is_null_value;
-      param_res[1].length = &param_res[1].length_value;
-      param_res[1].buffer = tmp_buf;
-      param_res[1].buffer_length = tmp_len;
-      if (MYSQL_TYPE_ORA_CLOB == type) {
-        param_res[1].buffer_type = MYSQL_TYPE_VAR_STRING;
+      if (0 != get_lob_data(mysql, lob, type, byte_offset, &char_len, &read_len, pdata, buf_len - buf_use)) {
+        ret = -1;
+        break;
+      }
+      if (type == MYSQL_TYPE_ORA_CLOB) {
+        byte_offset += char_len;
       } else {
-        param_res[1].buffer_type = MYSQL_TYPE_OB_RAW;
+        byte_offset += read_len;
       }
 
-      if (NULL == (stmt = mysql_stmt_init(mysql))) {
-        ret = -1;
-      } else if (prepare_execute_v2(mysql, stmt, read_sql, param_bind)) {
-        ret = -1;
-      } else if (mysql_stmt_bind_result(stmt, param_res)) {
-        ret = -1;
-      } else {
-        ret = mysql_stmt_fetch(stmt);
-        if (0 == ret) {
-          *data_len = param_res[1].length_value;
-          *act_len = *data_len;
-          if (*data_len > byte_len) {
-            *data_len = byte_len > buf_len ? buf_len : byte_len;
-          } else {
-            *data_len = *data_len > buf_len ? buf_len : *data_len;
-          }
-          memcpy(buf, tmp_buf, *data_len);
-        }
-      }
+      amtp += char_len;
+      pdata += read_len;
+      buf_use += read_len;
+      *data_len += read_len;
 
-      if (NULL != stmt) {
-        mysql_stmt_close(stmt);
+      if (buf_len - buf_use <= 0 || buf_use >= *act_len) {
+        ret = 0;
+        break;
       }
-
-      free(tmp_buf);
-      tmp_buf = NULL;
-    }
+    } while (read_len >= DBMS_LOB_MAX_LENGTH);
   }
   return ret;
 }
 
-my_bool set_nls_format(MYSQL *mysql)
-{
-  my_bool bret = TRUE;
-  if (mysql->oracle_mode) {
-    char *nls_date_format = getenv("NLS_DATE_FORMAT");
-    char *nls_timestamp_format = getenv("NLS_TIMESTAMP_FORMAT");
-    char *nls_timestamp_tz_format = getenv("NLS_TIMESTAMP_TZ_FORMAT");
-
-    if (NULL != nls_date_format) {
-      char change_date_format_sql[100];
-      snprintf(change_date_format_sql, 100, "ALTER SESSION SET NLS_DATE_FORMAT='%s';", nls_date_format);
-      if (mysql_query(mysql, change_date_format_sql)) {
-        bret = FALSE;
-      }
-    }
-    if (bret && NULL != nls_timestamp_format) {
-      char change_timestamp_format_sql[100];
-      snprintf(change_timestamp_format_sql, 100, "ALTER SESSION SET NLS_TIMESTAMP_FORMAT='%s';", nls_timestamp_format);
-      if (mysql_query(mysql, change_timestamp_format_sql)) {
-        bret = FALSE;
-      }
-    }
-    if (bret && NULL != nls_timestamp_tz_format) {
-      char change_timestamp_tz_format_sql[100];
-      snprintf(change_timestamp_tz_format_sql, 100, "ALTER SESSION SET NLS_TIMESTAMP_TZ_FORMAT='%s';", nls_timestamp_tz_format);
-      if (mysql_query(mysql, change_timestamp_tz_format_sql)) {
-        bret = FALSE;
-      }
-    }
-  }
-  return bret;
-}
 /*
  * judge where can use prepare_execute protocol
  * use  version to judge
@@ -5775,7 +5838,7 @@ static int stmt_read_prepare_execute_response(MYSQL_STMT* stmt)
     }
     if (param_count != 0)
     {
-      if (stmt->is_handle_returning_into && stmt->field_count + stmt->param_count == param_count)
+      if (stmt->is_handle_returning_into /*&& stmt->field_count + stmt->param_count == param_count*/)
       {
         /* It needs to exec prepare operation for the sql  with piece data send and returning ... into, Like:
          *      UPDATE TABLE ta SET c1 = :v1, c2 =:v2, c3 = :v3 RETURNING c0 INTO :c0
@@ -5875,8 +5938,10 @@ int STDCALL mysql_stmt_execute_v2(MYSQL_STMT *stmt,
  
   if (stmt->state < MYSQL_STMT_PREPARED)
   {
-    SET_CLIENT_ERROR(mysql, CR_COMMANDS_OUT_OF_SYNC, SQLSTATE_UNKNOWN, 0);
-    SET_CLIENT_STMT_ERROR(stmt, CR_COMMANDS_OUT_OF_SYNC, SQLSTATE_UNKNOWN, 0);
+    //SET_CLIENT_ERROR(mysql, CR_COMMANDS_OUT_OF_SYNC, SQLSTATE_UNKNOWN, 0);
+    //SET_CLIENT_STMT_ERROR(stmt, CR_COMMANDS_OUT_OF_SYNC, SQLSTATE_UNKNOWN, 0);
+    SET_OB_CLIENT_ERROR(mysql, CR_STATES_ERROR_NOT_PREPARED_EXECUTE_V2, SQLSTATE_UNKNOWN, 0);
+    SET_OB_CLIENT_STMT_ERROR(stmt, CR_STATES_ERROR_NOT_PREPARED_EXECUTE_V2, SQLSTATE_UNKNOWN, 0);
     return(1);
   }
 

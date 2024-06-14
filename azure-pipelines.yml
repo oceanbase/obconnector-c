@@ -55,7 +55,6 @@ jobs:
           echo %servername%
           msiexec /i %servername% INSTALLDIR=c:\projects\server SERVICENAME=mariadb ALLOWREMOTEROOTACCESS=true /qn
           c:\projects\server\bin\mysql.exe -e "create database testc" --user=root
-          c:\projects\server\bin\mysql.exe -e "GRANT ALL on *.* to 'someUser'@'%' identified by 'Passw@rd2' with grant option;" --user=root
         displayName: 'install server'
 
       - script: |
@@ -81,7 +80,6 @@ jobs:
         env:
           MYSQL_TEST_HOST: "mariadb.example.com"
           MYSQL_TEST_USER: 'someUser'
-          MYSQL_TEST_PASSWD: 'Passw@rd2'
           MYSQL_TEST_DB: 'testc'
           MYSQL_TEST_PORT: 3306
           TEST_SSL_CA_FILE: "$(System.DefaultWorkingDirectory)/tmp/server.crt"
@@ -207,8 +205,6 @@ jobs:
           	exit 1
           fi
 
-          sudo ./bin/mysql -e "CREATE USER 'someUser'@'%' identified by 'Passw@rd2';"
-          sudo ./bin/mysql -e "GRANT ALL on *.* to 'someUser'@'%' identified by 'Passw@rd2' with grant option;"
           sudo ./bin/mysql -e "CREATE DATABASE testc;"
 
           echo "Running tests"
@@ -225,7 +221,6 @@ jobs:
           MYSQL_TEST_USER: 'someUser'
           MYSQL_TEST_PORT: 3306
           MYSQL_TEST_TRAVIS: 1
-          MYSQL_TEST_PASSWD: 'Passw@rd2'
           TEST_SSL_CA_FILE: "$(System.DefaultWorkingDirectory)/tmp/server.crt"
           TEST_SSL_CLIENT_KEY_FILE: "$(System.DefaultWorkingDirectory)/tmp/client.key"
           TEST_SSL_CLIENT_CERT_FILE: "$(System.DefaultWorkingDirectory)/tmp/client.crt"
