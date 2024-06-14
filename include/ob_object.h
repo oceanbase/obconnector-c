@@ -87,6 +87,10 @@ typedef enum enum_obobjtype
   ObMaxType                 // invalid type, or count of obj type
 } ObObjType;
 
+#if defined(__powerpc64__)
+ typedef
+#endif
+
 typedef enum enum_obcollationtype
 {
   CS_TYPE_INVALID = 0,
@@ -103,6 +107,10 @@ typedef enum enum_obcollationtype
   CS_TYPE_GB18030_BIN = 249,
   CS_TYPE_MAX,
 } ObCollationType;
+
+#if defined(__powerpc64__)
+ typedef
+#endif
 
 typedef enum enum_obcollationlevel
 {
