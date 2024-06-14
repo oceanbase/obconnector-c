@@ -91,7 +91,7 @@ typedef enum enum_obobjtype
  typedef
 #endif
 
-typedef enum enum_obcollationtype
+enum enum_obcollationtype
 {
   CS_TYPE_INVALID = 0,
   CS_TYPE_GBK_CHINESE_CI = 28,
@@ -112,7 +112,7 @@ typedef enum enum_obcollationtype
  typedef
 #endif
 
-typedef enum enum_obcollationlevel
+enum enum_obcollationlevel
 {
   CS_LEVEL_EXPLICIT = 0,
   CS_LEVEL_NONE = 1,
