@@ -88,10 +88,7 @@ typedef enum enum_obobjtype
 } ObObjType;
 
 /* add typedef for enum to avoid multiple definition of ObCollationType issue on powerpc64 ppc64le */
-#if defined(__powerpc64__)
- typedef
-#endif
-enum enum_obcollationtype
+typedef enum enum_obcollationtype
 {
   CS_TYPE_INVALID = 0,
   CS_TYPE_GBK_CHINESE_CI = 28,
@@ -109,10 +106,7 @@ enum enum_obcollationtype
 } ObCollationType;
 
 /* add typedef for enum to avoid multiple definition of ObCollationLevel issue on powerpc64 ppc64le */
-#if defined(__powerpc64__)
- typedef
-#endif
-enum enum_obcollationlevel
+typedef enum enum_obcollationlevel
 {
   CS_LEVEL_EXPLICIT = 0,
   CS_LEVEL_NONE = 1,
