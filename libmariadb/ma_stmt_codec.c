@@ -1535,6 +1535,7 @@ static ulong get_complex_header_length(enum_types type) {
     return sizeof(MYSQL_COMPLEX_BIND_OBJECT);
   case TYPE_COLLECTION:
     return sizeof(MYSQL_COMPLEX_BIND_ARRAY);
+  case TYPE_NVARCHAR2:
   case TYPE_VARCHAR2:
   case TYPE_CHAR:
   case TYPE_RAW:
@@ -1547,6 +1548,14 @@ static ulong get_complex_header_length(enum_types type) {
   case TYPE_SHORT:
   case TYPE_FLOAT:
   case TYPE_DOUBLE:
+    return sizeof(MYSQL_COMPLEX_BIND_BASIC);
+  case TYPE_OB_NUMBER_FLOAT:
+    return sizeof(MYSQL_COMPLEX_BIND_STRING);
+  case TYPE_OB_INTERVAL_YM:
+  case TYPE_OB_INTERVAL_DS:
+  case TYPE_OB_TIMESTAMP_NANO:
+  case TYPE_OB_TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+  case TYPE_OB_TIMESTAMP_WITH_TIME_ZONE:
     return sizeof(MYSQL_COMPLEX_BIND_BASIC);
   default:
     return sizeof(MYSQL_COMPLEX_BIND_BASIC);
@@ -1671,6 +1680,122 @@ static void fetch_result_double_complex(MYSQL_COMPLEX_BIND_BASIC *header,
   return;
 }
 
+static void read_binary_interval(int type, ORACLE_INTERVAL *tm, uchar **pos)
+{
+  uint length = net_field_length(pos);
+  uchar *to = *pos;
+  ORACLE_INTERVAL *interval = tm;
+
+  switch (type)
+  {
+    case MYSQL_TYPE_OB_INTERVAL_DS: {
+      if (length == 14) {
+        interval->mysql_type = MYSQL_TYPE_OB_INTERVAL_DS;
+        interval->data_symbol = (to[0] > 0 ? -1 : 1);
+        interval->data_object.ds_object.ds_day = sint4korr(to + 1);
+        interval->data_object.ds_object.ds_hour = to[5];
+        interval->data_object.ds_object.ds_minute = to[6];
+        interval->data_object.ds_object.ds_second = to[7];
+        interval->data_object.ds_object.ds_frac_second = sint4korr(to + 8);
+        interval->data_object.ds_object.ds_day_scale = to[12];
+        interval->data_object.ds_object.ds_frac_second_scale = to[13];
+      }
+      break;
+    }
+    case MYSQL_TYPE_OB_INTERVAL_YM: {
+      if (length == 7) {
+        interval->mysql_type = MYSQL_TYPE_OB_INTERVAL_YM;
+        interval->data_symbol = (to[0] > 0 ? -1 : 1);
+        interval->data_object.ym_object.ym_year = sint4korr(to + 1);
+        interval->data_object.ym_object.ym_month = to[5];
+        interval->data_object.ym_object.ym_scale = to[6];
+      }
+      break;
+    }
+  }
+  *pos += length;
+}
+static void fetch_result_ob_interval_complex(MYSQL_COMPLEX_BIND_BASIC *header,
+                                            MYSQL_BIND *param,
+                                            uchar **row)
+{
+  ORACLE_INTERVAL *tm = NULL;
+
+  tm = fetch_result_complex_alloc_space(header, param, sizeof(ORACLE_INTERVAL));
+  if (NULL == tm) {
+    return;
+  }
+
+  read_binary_interval(header->buffer_type, tm, row);
+  return;
+}
+
+static void fetch_result_ob_timestamp_complex(MYSQL_COMPLEX_BIND_BASIC *header,
+                                            MYSQL_BIND *param,
+                                            uchar **row)
+{
+  void *buffer = NULL;
+  ulong bufferlen = 0;
+  ulong length = 0;
+  ulong tz_length = 0;
+  ulong buffer_offset = 0;
+  ulong buffer_length = 0;
+  ORACLE_TIME *tm = NULL;
+  uchar *to = NULL;
+
+  length = net_field_length(row);
+  bufferlen = sizeof(ORACLE_TIME) + length; //+length 包括TZ信息
+  buffer = fetch_result_complex_alloc_space((MYSQL_COMPLEX_BIND_HEADER *)header, param, bufferlen);
+  if (NULL == buffer || length < 12) {
+    return;
+  }
+
+  to = *row;
+
+  tm = (ORACLE_TIME*)buffer;
+  memset(tm, 0, sizeof(ORACLE_TIME));
+  tm->century = (int)(*(char*)to++);
+  tm->year = (int)(*(char*)to++);
+  tm->month = (uint)(*to++);
+  tm->day = (uint)(*to++);
+  tm->hour = (uint)(*to++);
+  tm->minute = (uint)(*to++);
+  tm->second = (uint)(*to++);
+
+  tm->second_part = (ulong)sint4korr(to);
+  to += 4;
+  tm->scale = (uint)(*to++);
+
+  buffer_length = buffer_offset = sizeof(ORACLE_TIME);
+  if (length > 12) {
+    tm->offset_hour = (int)(*(char*)to++);
+    tm->offset_minute = (int)(*(char*)to++);
+
+    tz_length = (uint)(*to++);
+    buffer_length += (tz_length + 1);
+    if (tz_length > 0 && buffer_offset + tz_length + 1 < bufferlen) {
+      memcpy((char*)buffer + buffer_offset, to, tz_length);
+      tm->tz_name = (char*)buffer + buffer_offset;
+      buffer_offset += tz_length;
+      *((char*)buffer + buffer_offset) = '\0';
+      buffer_offset++;
+    }
+    to += tz_length;
+
+    tz_length = (uint)(*to++);
+    buffer_length += (tz_length + 1);
+    if (tz_length > 0 && buffer_offset + tz_length + 1 < bufferlen) {
+      memcpy((char*)buffer + buffer_offset, to, tz_length);
+      tm->tz_abbr = (char*)buffer + buffer_offset;
+      buffer_offset += tz_length;
+      *((char*)buffer + buffer_offset) = '\0';
+      buffer_offset++;
+    }
+    to += tz_length;
+  }
+  *row = to;
+  return;
+}
 
 static void fetch_result_object_complex(MYSQL_COMPLEX_BIND_OBJECT *header,
                                         MYSQL_BIND *param,
@@ -1725,6 +1850,7 @@ static void fetch_result_object_complex(MYSQL_COMPLEX_BIND_OBJECT *header,
   header->length = (char*)buffer - (char*)header->buffer;
   return;
 }
+
 static void read_binary_datetime(MYSQL_TIME *tm, uchar **pos)
 {
   uint length= net_field_length(pos);
@@ -1850,11 +1976,13 @@ static void fetch_result_complex(MYSQL_BIND *param, void *buffer,
                                  CHILD_TYPE *child, uchar **row)
 {
   switch (child->type) {
+  case TYPE_OB_NUMBER_FLOAT:
   case TYPE_NUMBER:
     {
     fetch_result_str_complex((MYSQL_COMPLEX_BIND_STRING *)buffer, param, row);
     break;
     }
+  case TYPE_NVARCHAR2:
   case TYPE_VARCHAR2:
   case TYPE_CHAR:
     {
@@ -1909,6 +2037,19 @@ static void fetch_result_complex(MYSQL_BIND *param, void *buffer,
   case TYPE_DOUBLE:
     {
     fetch_result_double_complex((MYSQL_COMPLEX_BIND_BASIC *)buffer, param, row);
+    break;
+    }
+  case TYPE_OB_INTERVAL_DS:
+  case TYPE_OB_INTERVAL_YM:
+    {
+    fetch_result_ob_interval_complex((MYSQL_COMPLEX_BIND_BASIC *)buffer, param, row);
+    break;
+    }
+  case TYPE_OB_TIMESTAMP_NANO:
+  case TYPE_OB_TIMESTAMP_WITH_TIME_ZONE:
+  case TYPE_OB_TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+    {
+    fetch_result_ob_timestamp_complex((MYSQL_COMPLEX_BIND_BASIC *)buffer, param, row);
     break;
     }
   default:
@@ -1987,6 +2128,11 @@ static uint mysql_type_to_object_type(uint mysql_type)
       object_type = TYPE_VARCHAR2;
       break;
     }
+  case MYSQL_TYPE_OB_NVARCHAR2:
+    {
+      object_type = TYPE_NVARCHAR2;
+      break;
+    }
   case MYSQL_TYPE_OB_RAW:
     {
       object_type = TYPE_RAW;
@@ -2005,6 +2151,36 @@ static uint mysql_type_to_object_type(uint mysql_type)
   case MYSQL_TYPE_ARRAY:
     {
       object_type = TYPE_COLLECTION;
+      break;
+    }
+  case MYSQL_TYPE_OB_NUMBER_FLOAT:
+    {
+      object_type = TYPE_OB_NUMBER_FLOAT;
+      break;
+    }
+  case MYSQL_TYPE_OB_INTERVAL_DS:
+    {
+      object_type = TYPE_OB_INTERVAL_DS;
+      break;
+    }
+  case MYSQL_TYPE_OB_INTERVAL_YM:
+    {
+      object_type = TYPE_OB_INTERVAL_YM;
+      break;
+    }
+  case MYSQL_TYPE_OB_TIMESTAMP_NANO:
+    {
+      object_type = TYPE_OB_TIMESTAMP_NANO;
+      break;
+    }
+  case MYSQL_TYPE_OB_TIMESTAMP_WITH_TIME_ZONE:
+    {
+      object_type = TYPE_OB_TIMESTAMP_WITH_TIME_ZONE;
+      break;
+    }
+  case MYSQL_TYPE_OB_TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+    {
+      object_type = TYPE_OB_TIMESTAMP_WITH_LOCAL_TIME_ZONE;
       break;
     }
   default:
@@ -2029,6 +2205,12 @@ static void fill_complex_type(MYSQL_BIND *param, void *buffer,
     {
     MYSQL_COMPLEX_BIND_STRING *header = (MYSQL_COMPLEX_BIND_STRING *)buffer;
     header->buffer_type = MYSQL_TYPE_VARCHAR;
+    break;
+    }
+  case TYPE_NVARCHAR2:
+    {
+    MYSQL_COMPLEX_BIND_STRING *header = (MYSQL_COMPLEX_BIND_STRING *)buffer;
+    header->buffer_type = MYSQL_TYPE_OB_NVARCHAR2;
     break;
     }
   case TYPE_RAW:
@@ -2078,6 +2260,42 @@ static void fill_complex_type(MYSQL_BIND *param, void *buffer,
     MYSQL_COMPLEX_BIND_BASIC *header = (MYSQL_COMPLEX_BIND_BASIC *)buffer;
     header->buffer_type = MYSQL_TYPE_DOUBLE;
     break;
+    }
+  case TYPE_OB_NUMBER_FLOAT:
+    {
+      MYSQL_COMPLEX_BIND_STRING *header = (MYSQL_COMPLEX_BIND_STRING *)buffer;
+      header->buffer_type = MYSQL_TYPE_OB_NUMBER_FLOAT;
+      break;
+    }
+  case TYPE_OB_INTERVAL_DS:
+    {
+      MYSQL_COMPLEX_BIND_BASIC *header = (MYSQL_COMPLEX_BIND_BASIC *)buffer;
+      header->buffer_type = MYSQL_TYPE_OB_INTERVAL_DS;
+      break;
+    }
+  case TYPE_OB_INTERVAL_YM:
+    {
+      MYSQL_COMPLEX_BIND_BASIC *header = (MYSQL_COMPLEX_BIND_BASIC *)buffer;
+      header->buffer_type = MYSQL_TYPE_OB_INTERVAL_YM;
+      break;
+    }
+  case TYPE_OB_TIMESTAMP_NANO:
+    {
+      MYSQL_COMPLEX_BIND_BASIC *header = (MYSQL_COMPLEX_BIND_BASIC *)buffer;
+      header->buffer_type = MYSQL_TYPE_OB_TIMESTAMP_NANO;
+      break;
+    }
+  case TYPE_OB_TIMESTAMP_WITH_TIME_ZONE:
+    {
+      MYSQL_COMPLEX_BIND_BASIC *header = (MYSQL_COMPLEX_BIND_BASIC *)buffer;
+      header->buffer_type = MYSQL_TYPE_OB_TIMESTAMP_WITH_TIME_ZONE;
+      break;
+    }
+  case TYPE_OB_TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+    {
+      MYSQL_COMPLEX_BIND_BASIC *header = (MYSQL_COMPLEX_BIND_BASIC *)buffer;
+      header->buffer_type = MYSQL_TYPE_OB_TIMESTAMP_WITH_LOCAL_TIME_ZONE;
+      break;
     }
   case TYPE_OBJECT:
     {

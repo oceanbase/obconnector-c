@@ -17,12 +17,13 @@ typedef struct _st_obclient_lb_AddressList {
 }ObClientLbAddressList;
 
 typedef struct _st_obclient_lb_config{
-  int retry_all_downs;        //总的次数
-  int black_remove_strategy;    //2001
-  int black_remove_timeout;     //移出黑名单时间
-  int black_append_strategy;    //3002 NORMAL, 3001 RETRYDURATION
-  int black_append_retrytimes;  //单个address次数
-  int black_append_duration;    //时间duration内，执行>= retrytimes次加黑
+  unsigned int retry_all_downs;        //总的次数
+  unsigned int retry_timeout;          // LB 阶段总的超时时间(ms)
+  unsigned int black_remove_strategy;    //2001
+  unsigned int black_remove_timeout;     //移出黑名单时间(ms)
+  unsigned int black_append_strategy;    //3002 NORMAL, 3001 RETRYDURATION
+  unsigned int black_append_retrytimes;  //单个address次数
+  unsigned int black_append_duration;    //时间duration内(ms)，执行>= retrytimes次加黑
 
   unsigned int mysql_connect_timeout;
   unsigned int mysql_read_timeout;
@@ -42,6 +43,7 @@ typedef struct _st_obclient_lb_config{
   my_bool mysql_opt_interactive;
   my_bool mysql_report_data_truncation;
   my_bool mysql_opt_reconnect;
+  char* mysql_read_default_file;
 
   my_bool mysql_opt_use_ssl;
   my_bool mysql_opt_ssl_verify_server_cert;
@@ -58,6 +60,10 @@ typedef struct _st_obclient_lb_config{
 
 MYSQL* ob_mysql_real_connect(MYSQL* mysql, const char* tns_name, ObClientLbAddressList *addr_list, ObClientLbConfig *config,
   const char *user, const char *passwd, const char *db, const char *unix_socket, unsigned long client_flag, ObClientLbAddress* success);
+
+//addr_list [fe80::42:acff:fe11:2%eth0]:38884,[xxx.xxx.xxx.xxx]:2222,xxx.xxx.xxx.xxx:38884
+MYSQL* ob_mysql_real_connect2(MYSQL* mysql, const char* tns_name, const char *addr_list, ObClientLbConfig *config,
+  const char *user, const char *passwd, const char *db, const char *unix_socket, unsigned long client_flag, char* success, int len_success);
 
 #ifdef __cplusplus
 }

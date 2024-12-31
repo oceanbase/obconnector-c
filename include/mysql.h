@@ -200,6 +200,7 @@ extern const char *SQLSTATE_UNKNOWN;
   typedef struct st_mysql_rows {
     struct st_mysql_rows *next;		/* list of rows */
     MYSQL_ROW data;
+    unsigned long* data_length;
     unsigned long length;
   } MYSQL_ROWS;
 

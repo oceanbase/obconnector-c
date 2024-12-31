@@ -101,7 +101,7 @@ static ObClientLBKeyType tns_keytype_15[] = { OBCLIENT_LB_REMOVE_STRATEGY, OBCLI
 static ObClientLBKeyType tns_keytype_16[] = { OBCLIENT_LB_SESSION_VARIABLE};
 static ObClientLBKeyType tns_keytype_17[] = { OBCLIENT_LB_READ_TIMEOUT};
 static ObClientLBKeyType tns_keytype_18[] = { OBCLIENT_LB_EXTRA_INFO, OBCLIENT_LB_OBLB_RETRY_TIMEOUT, OBCLIENT_LB_WRITE_TIMEOUT};
-static ObClientLBKeyType tns_keytype_19[] = { OBCLIENT_LB_OBLB_GROUP_STRATEGY };
+static ObClientLBKeyType tns_keytype_19[] = { OBCLIENT_LB_OBLB_GROUP_STRATEGY};
 static ObClientLBKeyType tns_keytype_20[] = { OBCLIENT_LB_OBLB_RETRY_ALL_DOWNS, OBCLIENT_LB_CONNECT_TIMEOUT};
 
 static const void *tns_key_array[] = {
@@ -568,7 +568,7 @@ int ObClientTnsServiceSkip(ObClientTnsParseParams *parse_params)
   return ret;
 }
 
-int ObClientTnsServiceExtraInfoGet(ObClientTnsService *tns_service, char *extra_info, int *extra_info_len, int *ob_mode)
+int ObClientTnsServiceExtraInfoGet(ObClientTnsService *tns_service, char *extra_info, int *extra_info_len, int *ob_mode, char* session_variable, int *session_variable_len)
 {
   int ret = 0;
   ObClientDescription *des;
@@ -580,10 +580,16 @@ int ObClientTnsServiceExtraInfoGet(ObClientTnsService *tns_service, char *extra_
     ret = -1;
   } else if (OB_ISNULL(con_data = des->connect_data)) {
     ret = -1;
-  } else if (0 != con_data->user_extra_info_len) {
-    *extra_info_len = con_data->user_extra_info_len;
-    strncpy(extra_info, con_data->user_extra_info, *extra_info_len);
-    *ob_mode = con_data->ob_mode;
+  } else {
+    if (0 != con_data->user_extra_info_len) {
+      *extra_info_len = con_data->user_extra_info_len;
+      strncpy(extra_info, con_data->user_extra_info, *extra_info_len);
+      *ob_mode = con_data->ob_mode;
+    }
+    if (0 != con_data->session_variable_len) {
+      *session_variable_len = con_data->session_variable_len;
+      strncpy(session_variable, con_data->session_variable, *session_variable_len);
+    }
   }
 
   return ret;
@@ -791,6 +797,17 @@ int ObClientDescriptionBuild(ObClientTnsService *tns_service, ObClientTnsParsePa
           TNS_PARSE_INTRGER_VALUE(parse_params, des->read_timout);
         } else if (OBCLIENT_LB_WRITE_TIMEOUT == parse_params->key_type) {
           TNS_PARSE_INTRGER_VALUE(parse_params, des->write_timout);
+        } else if (OBCLIENT_LB_OBLB_STRATEGY == parse_params->key_type) {
+          TNS_PARSE(parse_params, TNS_KEY);
+          if (0 == strncasecmp(parse_params->tns_key, "RANDOM", parse_params->tns_key_len)) {
+            des->oblb_strategy = OBCLIENT_LB_OPTION_RANDOM;
+          } else if (0 == strncasecmp(parse_params->tns_key, "SERVERAFFINITY", parse_params->tns_key_len)) {
+            des->oblb_strategy = OBCLIENT_LB_OPTION_SERVERAFFINITY;
+          } else if (0 == strncasecmp(parse_params->tns_key, "ROTATION", parse_params->tns_key_len)) {
+            des->oblb_strategy = OBCLIENT_LB_OPTION_ROTATION;
+          } else {
+            ret = -1;
+          }
         } else if (OBCLIENT_LB_OBLB_GROUP_STRATEGY == parse_params->key_type) {
           TNS_PARSE(parse_params, TNS_KEY);
           if (0 == strncasecmp(parse_params->tns_key, "ROTATION", parse_params->tns_key_len)) {
@@ -1244,6 +1261,9 @@ int ObClientConnectDataDisplay(ObClientConnectData *con_data, FILE *display_file
       fprintf(display_file, "----------obmode:%ld\n", con_data->ob_mode);
       fprintf(display_file, "----------use_default_sid:%ld\n", con_data->use_default_sid);
     }
+    if (0 != con_data->session_variable_len) {
+      fprintf(display_file, "----------session_variable:%.*s\n", con_data->session_variable_len, con_data->session_variable);
+    }
   }
 
   return ret;
@@ -1283,6 +1303,8 @@ int ObClientConnectDataBuild(ObClientDescription *des, ObClientTnsParseParams *p
           TNS_PARSE_INTRGER_VALUE(parse_params, connect_data->ob_mode);
         } else if (OBCLIENT_LB_USE_DEFAULT_SID == parse_params->key_type) {
           TNS_PARSE_INTRGER_VALUE(parse_params, connect_data->use_default_sid);
+        } else if (OBCLIENT_LB_SESSION_VARIABLE == parse_params->key_type) {
+          TNS_PARSE_STRING_VALUE(parse_params, connect_data->session_variable, connect_data->session_variable_len, OBCLIENT_TNS_KEY_SIZE);
         } else {
           ret = -1;
         }
@@ -1467,19 +1489,25 @@ int ObClientTnsParseBlank(ObClientTnsParseParams *parse_params)
         }
       } else {
         while (parse_params->buffer_pos < parse_params->buffer_len) {
-          ch = parse_params->tns_buffer[parse_params->buffer_pos];
-          if ('\t' == ch || '\n' == ch || ' ' == ch) {
-            parse_params->buffer_pos++;
-          } else if ('#' == ch) { // ignore comments
+          if (!parse_params->is_comment) {
+            ch = parse_params->tns_buffer[parse_params->buffer_pos];
+            if (('\t' == ch || '\n' == ch || ' ' == ch || '\r' == ch)) {
+              parse_params->buffer_pos++;
+            } else if ('#' == ch) { // ignore comments
+              parse_params->is_comment = 1;
+            } else {
+              break;
+            }
+          } else {
             unsigned int tmp = parse_params->buffer_pos;
             for (; tmp < parse_params->buffer_len; tmp++) {
               char tmpch = parse_params->tns_buffer[tmp];
-              if ('\n' == tmpch || '\0' == tmpch)
+              if ('\n' == tmpch || '\0' == tmpch) {
+                parse_params->is_comment = 0;
                 break;
+              }
             }
             parse_params->buffer_pos = tmp;
-          } else {
-            break;
           }
         }
         if (parse_params->buffer_pos < parse_params->buffer_len) {

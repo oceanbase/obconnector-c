@@ -342,6 +342,7 @@ SET(MARIADB_NONBLOCK_SYMBOLS
  get_ob_lob_payload_data_len
  stmt_get_data_from_lobv2
  ob_mysql_real_connect
+ ob_mysql_real_connect2
  ob_get_libobclient_version
  ob_set_socket5_proxy
 )

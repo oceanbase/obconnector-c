@@ -207,6 +207,26 @@ static enum_types convert_type(const char *type) {
     return TYPE_DATE;
   } else if (!strcmp(type, "RAW")) {
     return TYPE_RAW;
+  } else if (!strcmp(type, "NVARCHAR2")) {
+    return TYPE_NVARCHAR2;
+  } else if (!strcmp(type, "FLOAT")) {
+    return TYPE_OB_NUMBER_FLOAT;
+  } else if (!strncmp(type, "INTERVAL YEAR", 13)) {
+    return TYPE_OB_INTERVAL_YM;
+  } else if (!strncmp(type, "INTERVAL DAY", 12)) {
+    return TYPE_OB_INTERVAL_DS;
+  } else if (!strncmp(type, "TIMESTAMP", 9)) {
+    if (strstr(type, "WITH TIME ZONE")) {
+      return TYPE_OB_TIMESTAMP_WITH_TIME_ZONE;
+    } else if (strstr(type, "WITH LOCAL TIME ZONE")) {
+      return TYPE_OB_TIMESTAMP_WITH_LOCAL_TIME_ZONE;
+    } else {
+      return TYPE_OB_TIMESTAMP_NANO;
+    }
+  } else if (!strcmp(type, "BINARY_FLOAT")) {
+    return TYPE_FLOAT;
+  } else if (!strcmp(type, "BINARY_DOUBLE")) {
+    return TYPE_DOUBLE;
   } else {
     return TYPE_MAX;
   }

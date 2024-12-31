@@ -44,8 +44,8 @@ typedef struct _st_ob_lb_address_list {
 }ObLbAddressList;
 
 typedef struct _st_connect_info {
-  int connect_cnt;
-  int connect_max;
+  unsigned int connect_cnt;
+  unsigned int connect_max;
   int64_t *connect_list;
 }ConnectInfo;
 
@@ -137,8 +137,8 @@ static ObLbAddress* get_ob_address_by_address_list(ObLbAddressList *addr_list)
           break;
         }
         case OBCLIENT_LB_OPTION_SERVERAFFINITY: {
-          int rand_number = (int)rand() % weight + 1;
           int index = 0;
+          int rand_number = (int)rand() % weight + 1;
           for (index = 0; index < valid_cnt; ++index) {
             rand_number -= addr_list->add_arr[idxarr[index]].weight;
             if (index == valid_cnt - 1 || rand_number <= 0) {
@@ -192,7 +192,7 @@ static void check_ob_address_black(ObLbAddress * address, ObClientLbConfig *conf
         int len = info->connect_cnt;
         int64_t *list = info->connect_list;
         int64_t curtime = get_current_time_us();
-        int64_t duration = config->black_append_duration * 1000;// ��λmsתΪus
+        int64_t duration = config->black_append_duration * 1000;// µ¥Î»ms×ªÎªus
         for (idx = 0; idx < len; idx++) {
           if (curtime - list[idx] <= duration) {
             break;
@@ -236,16 +236,74 @@ static void check_ob_address_white(ObLbAddressList * addr_list, ObClientLbConfig
   }
 }
 
-static int init_oblb_addresslist(ObLbAddressList* list, ObClientLbAddressList* addrlist) {
+static int init_oblb_addresslist_str(ObLbAddressList* list, char* str, ObClientLBOption oblb_strategy) {
+  int ret = 0;
+  if (NULL == list || NULL == str) {
+    ret = -1;
+  } else {
+    char *p = str, *s = NULL, *e = NULL;
+    int count = 1;
+    while (p && *p) {
+      if (*p++ == ',')
+        count++;
+    }
+
+    if (OB_ISNULL(list->add_arr = (ObLbAddress*)calloc(1, count * sizeof(ObLbAddress)))) {
+      ret = -1;
+    } else {
+      unsigned int i = 0;
+      my_bool valid = 0;
+      my_bool instring = 0;
+      int idx = 0;
+      int port = 0;
+      p = str;
+      while (p && *p) {
+        if (instring == 0 && *p == '[') {
+          instring = 1;
+          s = p + 1;
+          valid = 0;
+        } else if (instring == 1 && *p == ']') {
+          instring = 0;
+          e = p;
+          valid = 1;
+        } else if (instring == 0 && *p == ',') {
+          s = p + 1;
+          e = NULL;
+          valid = 0;
+        } else if (instring == 0 && *p == ':') {
+          if (valid == 0) {
+            e = p;
+          }
+          if (s && e) {
+            memcpy(list->add_arr[idx].host, s, e - s);
+            list->add_arr[idx].port = atoi(p + 1);
+            list->add_arr[i].weight = 1;
+            list->add_arr[i].state = OBCLIENT_LB_WHITE;
+
+            idx++;
+            s = NULL;
+            e = NULL;
+            valid = 0;
+          }
+        }
+        p++;
+      }
+      list->count = idx;
+      list->rotation_flag = 0;
+      list->option = oblb_strategy;
+    }
+  }
+  return ret;
+}
+static int init_oblb_addresslist(ObLbAddressList* list, ObClientLbAddressList* addrlist, ObClientLBOption oblb_strategy) {
   int ret = 0;
 
   if (!list || !addrlist || !addrlist->address_list || addrlist->address_list_count <= 0) {
     ret = -1;
-  } else if (OB_ISNULL(list->add_arr = (ObLbAddress*)malloc(addrlist->address_list_count * sizeof(ObLbAddress)))) {
+  } else if (OB_ISNULL(list->add_arr = (ObLbAddress*)calloc(1, addrlist->address_list_count * sizeof(ObLbAddress)))) {
     ret = -1;
   } else {
     unsigned int i = 0;
-    memset(list->add_arr, 0, addrlist->address_list_count * sizeof(ObLbAddress));
     for (i = 0; i < addrlist->address_list_count; i++) {
       memcpy(list->add_arr[i].host, addrlist->address_list[i].host, strlen(addrlist->address_list[i].host));
       list->add_arr[i].port = addrlist->address_list[i].port;
@@ -254,19 +312,18 @@ static int init_oblb_addresslist(ObLbAddressList* list, ObClientLbAddressList* a
     }
     list->count = addrlist->address_list_count;
     list->rotation_flag = 0;
-    list->option = OBCLIENT_LB_OPTION_ROTATION;
+    list->option = oblb_strategy;
   }
   return ret;
 }
-static int init_oblb_addresslist_tns(ObLbAddressList* list, ObClientAddressList* addrlist) {
+static int init_oblb_addresslist_tns(ObLbAddressList* list, ObClientAddressList* addrlist, ObClientLBOption oblb_strategy) {
   int ret = 0;
   if (!list || !addrlist || !addrlist->address || addrlist->address_count <= 0) {
     ret = -1;
-  } else if (OB_ISNULL(list->add_arr = (ObLbAddress*)malloc(addrlist->address_count * sizeof(ObLbAddress)))){
+  } else if (OB_ISNULL(list->add_arr = (ObLbAddress*)calloc(1, addrlist->address_count * sizeof(ObLbAddress)))){
     ret = -1;
   } else {
     unsigned int i = 0;
-    memset(list->add_arr, 0, addrlist->address_count * sizeof(ObLbAddress));
     for (i = 0; i < addrlist->address_count; i++) {
       memcpy(list->add_arr[i].host, addrlist->address[i].host, addrlist->address[i].host_len);
       list->add_arr[i].port = addrlist->address[i].port;
@@ -275,18 +332,57 @@ static int init_oblb_addresslist_tns(ObLbAddressList* list, ObClientAddressList*
     }
     list->count = addrlist->address_count;
     list->rotation_flag = 0;
-    list->option = addrlist->oblb_strategy;
+    if (addrlist->oblb_strategy != OBCLIENT_LB_OPTION_RANDOM &&
+      addrlist->oblb_strategy != OBCLIENT_LB_OPTION_SERVERAFFINITY &&
+      addrlist->oblb_strategy != OBCLIENT_LB_OPTION_ROTATION) {
+      list->option = oblb_strategy;
+    } else {
+      list->option = addrlist->oblb_strategy;
+    }
+  }
+  return ret;
+}
+static void release_oblb_addresslist(ObLbAddressList* list) {
+  if (list && list->add_arr) {
+    free(list->add_arr);
+    list->add_arr = NULL;
+    list->count = 0;
+  }
+}
+
+static int post_session_variable(MYSQL *mysql, char *session_variable, int session_variable_len)
+{
+  int ret = 0;
+
+  if (NULL == mysql) {
+    ret = -1;
+  } else if (0 == session_variable_len) {
+    ;
+  } else {
+    char post_sql[1024] = { 0 };
+    int post_sql_len = snprintf(post_sql, 1024, "set %.*s", session_variable_len, session_variable);
+    if (post_sql_len < 0) {
+      ret = -1;
+    } else if (mysql_real_query(mysql, post_sql, post_sql_len)) {
+      ret = -1;
+    }
   }
   return ret;
 }
 
-static MYSQL* connect_by_addresslist(MYSQL* mysql, ObLbAddressList *addr_list, ObClientLbConfig *config,
+
+static MYSQL* connect_by_addresslist(MYSQL* mysql, int64_t lb_starttime, ObLbAddressList *addr_list, ObClientLbConfig *config,
   const char *user, const char *passwd, const char *db, const char *unix_socket, unsigned long client_flag, ObClientLbAddress* success)
 {
   ObLbAddress *address = NULL;
   MYSQL* tmp = NULL;
   unsigned int i = 0;
   int err = 0;
+  char buf[128] = { 0 };
+  int64_t lb_endtime = 0;
+  my_bool default_report_data_truncation = 1;
+  unsigned int default_local_infile = 2;
+  unsigned int default_connect_timeout = 6;//s
 
   unsigned int mysql_connect_timeout = 0;
   unsigned int mysql_read_timeout = 0;
@@ -307,6 +403,7 @@ static MYSQL* connect_by_addresslist(MYSQL* mysql, ObLbAddressList *addr_list, O
   my_bool mysql_opt_interactive = 0;
   my_bool mysql_report_data_truncation = 0;
   my_bool mysql_opt_reconnect = 0;
+  char* mysql_read_default_file = NULL;
 
   my_bool mysql_opt_use_ssl = 0;
   my_bool mysql_opt_ssl_verify_server_cert = 0;
@@ -318,8 +415,9 @@ static MYSQL* connect_by_addresslist(MYSQL* mysql, ObLbAddressList *addr_list, O
   char *mysql_opt_ssl_crl = NULL;
   char *mysql_opt_ssl_crlpath = NULL;
   char *mysql_opt_tls_version = NULL;
-
+  
   if (mysql == NULL || addr_list == NULL || config == NULL || addr_list->add_arr == NULL || addr_list->count <= 0) {
+    SET_CLIENT_ERROR(mysql, CR_UNKNOWN_ERROR, SQLSTATE_UNKNOWN, "invalid handle or address list is zero.");
     return NULL;
   }
 
@@ -328,13 +426,6 @@ static MYSQL* connect_by_addresslist(MYSQL* mysql, ObLbAddressList *addr_list, O
     addr_list->option != OBCLIENT_LB_OPTION_SERVERAFFINITY) {
     addr_list->option = OBCLIENT_LB_OPTION_ROTATION;
   }
-  if (config->black_append_strategy != OBCLIENT_LB_OPTION_NORMAL &&
-    config->black_append_strategy != OBCLIENT_LB_OPTION_RETRY_DERUATION) {
-    config->black_append_strategy = OBCLIENT_LB_OPTION_NORMAL;
-  }
-  if (config->retry_all_downs <= 0) config->retry_all_downs = addr_list->count;
-  if (config->black_append_duration <= 0) config->black_append_duration = 60 * 1000;
-  if (config->black_append_retrytimes <= 0) config->black_append_retrytimes = 1;
 
   for (i = 0; i < addr_list->count; i++) {
     addr_list->add_arr[i].state = OBCLIENT_LB_WHITE;
@@ -344,6 +435,8 @@ static MYSQL* connect_by_addresslist(MYSQL* mysql, ObLbAddressList *addr_list, O
     }
     init_connect_info(&(addr_list->add_arr[i]));
   }
+  lb_endtime = lb_starttime + config->retry_timeout * 1000;
+  srand(time(NULL));
 
   //init mysql options
   mysql_connect_timeout = config->mysql_connect_timeout;
@@ -364,6 +457,7 @@ static MYSQL* connect_by_addresslist(MYSQL* mysql, ObLbAddressList *addr_list, O
   mysql_opt_interactive = config->mysql_opt_interactive;
   mysql_report_data_truncation = config->mysql_report_data_truncation;
   mysql_opt_reconnect = config->mysql_opt_reconnect;
+  mysql_read_default_file = config->mysql_read_default_file;
 
   mysql_opt_use_ssl = config->mysql_opt_use_ssl;
   mysql_opt_ssl_verify_server_cert = config->mysql_opt_ssl_verify_server_cert;
@@ -382,6 +476,7 @@ static MYSQL* connect_by_addresslist(MYSQL* mysql, ObLbAddressList *addr_list, O
 
     //get address
     if (NULL == (address = get_ob_address_by_address_list(addr_list))) {
+      SET_CLIENT_ERROR(mysql, CR_UNKNOWN_ERROR, SQLSTATE_UNKNOWN, "address list is empty(all in black).");
       break;
     }
 
@@ -392,6 +487,10 @@ static MYSQL* connect_by_addresslist(MYSQL* mysql, ObLbAddressList *addr_list, O
 #ifdef DEBUG_LOAD_BALANCE
     printf("host:%s,port:%d,state:%d\n", address->host, address->port, address->state);
 #endif
+    //set default options
+    mysql_options(mysql, MYSQL_REPORT_DATA_TRUNCATION, (char *)&default_report_data_truncation);
+    mysql_options(mysql, MYSQL_OPT_LOCAL_INFILE, (char*)&default_local_infile);
+    mysql_options(mysql, MYSQL_OPT_CONNECT_TIMEOUT, &default_connect_timeout);
 
     //mysql options 
     if (mysql_connect_timeout > 0)
@@ -430,6 +529,8 @@ static MYSQL* connect_by_addresslist(MYSQL* mysql, ObLbAddressList *addr_list, O
       mysql_options(mysql, MYSQL_REPORT_DATA_TRUNCATION, (char *)&mysql_report_data_truncation);
     if (mysql_opt_reconnect)
       mysql_options(mysql, MYSQL_OPT_RECONNECT, (char *)&mysql_opt_reconnect);
+    if (mysql_read_default_file && *mysql_read_default_file)
+      mysql_options(mysql, MYSQL_READ_DEFAULT_FILE, (char*)mysql_read_default_file);
 
     if (mysql_opt_use_ssl) {
       mysql_ssl_set(mysql, mysql_opt_ssl_key, mysql_opt_ssl_cert, mysql_opt_ssl_ca, mysql_opt_ssl_capath, mysql_opt_ssl_cipher);
@@ -459,8 +560,18 @@ static MYSQL* connect_by_addresslist(MYSQL* mysql, ObLbAddressList *addr_list, O
     //check black
     check_ob_address_black(address, config);
 
+    if (config->retry_timeout > 0 && get_current_time_us() > lb_endtime) {
+      snprintf(buf, sizeof(buf), "retry_timeout(%d)(%lld-%lld).", config->retry_timeout, lb_starttime, get_current_time_us());
+      SET_CLIENT_ERROR(mysql, CR_UNKNOWN_ERROR, SQLSTATE_UNKNOWN, buf);
+      break;
+    }
+
     config->retry_all_downs--;
-  } while (address && config->retry_all_downs > 0);
+    if (config->retry_all_downs <= 0) {
+      SET_CLIENT_ERROR(mysql, CR_UNKNOWN_ERROR, SQLSTATE_UNKNOWN, "retry_all_downs is zero.");
+      break;
+    }
+  } while (address);
 
   //release connect
   for (i = 0; i < addr_list->count; i++) {
@@ -470,23 +581,28 @@ static MYSQL* connect_by_addresslist(MYSQL* mysql, ObLbAddressList *addr_list, O
   return tmp;
 }
 
-static MYSQL* connect_by_tnsname(MYSQL* mysql, const char* tns_name, ObClientLbConfig * config,
+static MYSQL* connect_by_tnsname(MYSQL* mysql, int64_t lb_starttime, const char* tns_name, ObClientLbConfig * config,
   const char *user, const char* passwd, const char *db, const char* unix_socket, unsigned long client_flag, ObClientLbAddress *success)
 {
   int ret = 0;
   MYSQL *tmp = NULL;
+  char buf[128] = { 0 };
   my_bool find = 0;
   ObClientTns tns;
   const char *sid = db;
+  char session_variable[1024] = { 0 };
   char new_user_name[256] = { 0 };
   int user_len = strlen((const char *)user ? user : "");
+  int64_t lb_endtime = 0;
 
-  if (OB_FAIL(ObClientTnsInit(&tns))) {
-    tmp = NULL;
+  if (NULL == tns_name || NULL == config) {
+    SET_CLIENT_ERROR(mysql, CR_UNKNOWN_ERROR, SQLSTATE_UNKNOWN, "invalid tns_name or config.");
+  } else if (OB_FAIL(ObClientTnsInit(&tns))) {
+    SET_CLIENT_ERROR(mysql, CR_UNKNOWN_ERROR, SQLSTATE_UNKNOWN, "tns init fail.");
   } else if (OB_FAIL(ObClientTnsBuild(&tns, tns_name, strlen(tns_name), &find))) {
-    tmp = NULL;
+    SET_CLIENT_ERROR(mysql, CR_UNKNOWN_ERROR, SQLSTATE_UNKNOWN, "ob client tns build fail.");
   } else if (1 != find || !tns.tns_service || !tns.tns_service->description || tns.tns_service->description_count == 0) {
-    tmp = NULL;
+    SET_CLIENT_ERROR(mysql, CR_UNKNOWN_ERROR, SQLSTATE_UNKNOWN, "tns description is null.");
   } else {
     unsigned int i = 0;
     ObClientDescription *des = tns.tns_service->description;
@@ -507,28 +623,40 @@ static MYSQL* connect_by_tnsname(MYSQL* mysql, const char* tns_name, ObClientLbC
 
     //tns config
     config->retry_all_downs = des->retry_all_downs;
+    config->retry_timeout = des->retry_timeout;
     config->black_remove_strategy = des->black_list_conf.remove_strategy;
     config->black_remove_timeout = des->black_list_conf.remove_timeout;
     config->black_append_strategy = des->black_list_conf.append_strategy;
     config->black_append_duration = des->black_list_conf.duration;
     config->black_append_retrytimes = des->black_list_conf.retry_times;
+    if (des->connect_timout > 0) config->mysql_connect_timeout = des->connect_timout;
+    if (des->read_timout > 0) config->mysql_read_timeout = des->read_timout;
+    if (des->write_timout > 0) config->mysql_write_timeout = des->write_timout;
+    lb_endtime = lb_starttime + config->retry_timeout * 1000;
 
     for (i = 0; i < des->address_list_count; i++) {
-      ObLbAddressList list;
-      memset(&list, 0, sizeof(list));
 #ifdef DEBUG_LOAD_BALANCE
       printf("------------------------------------------\n");
 #endif
 
-      if (OB_SUCC(init_oblb_addresslist_tns(&list, &(des->address_list[i])))) {
-        tmp = connect_by_addresslist(mysql, &list, config, new_user_name, passwd, sid, unix_socket, client_flag, success);
+      ObLbAddressList list;
+      memset(&list, 0, sizeof(list));
+      if (OB_SUCC(init_oblb_addresslist_tns(&list, &(des->address_list[i]), des->oblb_strategy))) {
+        tmp = connect_by_addresslist(mysql, lb_starttime, &list, config, new_user_name, passwd, sid, unix_socket, client_flag, success);
       }
-      if (list.add_arr) {
-        free(list.add_arr);
-        list.add_arr = NULL;
-        list.count = 0;
-      }
+      release_oblb_addresslist(&list);
+
+      //connect success
       if (tmp) {
+        if (des && des->connect_data && des->connect_data->session_variable_len > 0) {
+          post_session_variable(tmp, des->connect_data->session_variable, des->connect_data->session_variable_len);
+        }
+        break;
+      }
+
+      if (config->retry_timeout > 0 && get_current_time_us() > lb_endtime) {
+        snprintf(buf, sizeof(buf), "retry_timeout(%d)(%lld-%lld).", config->retry_timeout, lb_starttime, get_current_time_us());
+        SET_CLIENT_ERROR(mysql, CR_UNKNOWN_ERROR, SQLSTATE_UNKNOWN, buf);
         break;
       }
     }
@@ -542,20 +670,84 @@ MYSQL* ob_mysql_real_connect(MYSQL* mysql, const char* tns_name, ObClientLbAddre
 {
   int ret = 0;
   MYSQL *tmp = NULL;
+  ObClientLbConfig default_config = {0};
+  int64_t lb_starttime = get_current_time_us();
+
+  if (NULL == config) {
+    memset(&default_config, 0, sizeof(ObClientLbConfig));
+    config = &default_config;
+  }
 
   if (tns_name && *tns_name) {
-    tmp = connect_by_tnsname(mysql, tns_name, config, user, passwd, db, unix_socket, client_flag, success);
-  } else {
+    tmp = connect_by_tnsname(mysql, lb_starttime, tns_name, config, user, passwd, db, unix_socket, client_flag, success);
+  } else if (addr_list) {
     ObLbAddressList list;
     memset(&list, 0, sizeof(list));
-    if (OB_SUCC(init_oblb_addresslist(&list, addr_list))) {
-      tmp = connect_by_addresslist(mysql, &list, config, user, passwd, db, unix_socket, client_flag, success);
+    if (OB_SUCC(init_oblb_addresslist(&list, addr_list, OBCLIENT_LB_OPTION_ROTATION))) {
+      if (config->retry_all_downs <= 0) config->retry_all_downs = addr_list->address_list_count;
+      if (config->retry_timeout <= 0) config->retry_timeout = 0;  //list µØÖ·Ä£Ê½Ä¬ÈÏÂÖÑµ£¬Õâ¸ö²ÎÊý²»ÉúÐ§
+      if (config->black_append_strategy != OBCLIENT_LB_OPTION_NORMAL &&
+        config->black_append_strategy != OBCLIENT_LB_OPTION_RETRY_DERUATION) {
+        config->black_append_strategy = OBCLIENT_LB_OPTION_NORMAL;
+      }
+      if (config->black_append_duration <= 0) config->black_append_duration = 10 * 1000;
+      if (config->black_append_retrytimes <= 0) config->black_append_retrytimes = 1;
+      if (config->black_remove_strategy != OBCLIENT_LB_OPTION_TIMEOUT) {
+        config->black_remove_strategy = OBCLIENT_LB_OPTION_TIMEOUT;
+      }
+      //if (config->black_remove_timeout <= 0) config->black_remove_timeout = 50 * 1000;
+
+      tmp = connect_by_addresslist(mysql, lb_starttime, &list, config, user, passwd, db, unix_socket, client_flag, success);
     }
-    if (list.add_arr) {
-      free(list.add_arr);
-      list.add_arr = NULL;
-      list.count = 0;
+    release_oblb_addresslist(&list);
+  } else {
+    SET_CLIENT_ERROR(mysql, CR_UNKNOWN_ERROR, SQLSTATE_UNKNOWN, "tns_name/addr_list is null.");
+  }
+
+  return tmp;
+}
+
+MYSQL* ob_mysql_real_connect2(MYSQL* mysql, const char* tns_name, const char *addr_list, ObClientLbConfig *config,
+  const char *user, const char *passwd, const char *db, const char *unix_socket, unsigned long client_flag, char* success, int len_success)
+{
+  int ret = 0;
+  MYSQL *tmp = NULL;
+  ObClientLbConfig default_config = { 0 };
+  ObClientLbAddress success_addr;
+  int64_t lb_starttime = get_current_time_us();
+  memset(&success_addr, 0, sizeof(success_addr));
+
+  if (NULL == config) {
+    memset(&default_config, 0, sizeof(ObClientLbConfig));
+    config = &default_config;
+  }
+
+  if (tns_name && *tns_name) {
+    tmp = connect_by_tnsname(mysql, lb_starttime, tns_name, config, user, passwd, db, unix_socket, client_flag, &success_addr);
+  } else if (addr_list) {
+    ObLbAddressList list;
+    memset(&list, 0, sizeof(list));
+    if (OB_SUCC(init_oblb_addresslist_str(&list, (char*)addr_list, OBCLIENT_LB_OPTION_ROTATION))) {
+      if (config->retry_all_downs <= 0) config->retry_all_downs = list.count;
+      if (config->retry_timeout <= 0) config->retry_timeout = 0;  //list µØÖ·Ä£Ê½Ä¬ÈÏÂÖÑµ£¬Õâ¸ö²ÎÊý²»ÉúÐ§
+      if (config->black_append_strategy != OBCLIENT_LB_OPTION_NORMAL &&
+        config->black_append_strategy != OBCLIENT_LB_OPTION_RETRY_DERUATION) {
+        config->black_append_strategy = OBCLIENT_LB_OPTION_NORMAL;
+      }
+      if (config->black_append_duration <= 0) config->black_append_duration = 10 * 1000;
+      if (config->black_append_retrytimes <= 0) config->black_append_retrytimes = 1;
+      if (config->black_remove_strategy != OBCLIENT_LB_OPTION_TIMEOUT) {
+        config->black_remove_strategy = OBCLIENT_LB_OPTION_TIMEOUT;
+      }
+      //if (config->black_remove_timeout <= 0) config->black_remove_timeout = 50 * 1000;
+      tmp = connect_by_addresslist(mysql, lb_starttime, &list, config, user, passwd, db, unix_socket, client_flag, &success_addr);
     }
+    release_oblb_addresslist(&list);
+  } else {
+    SET_CLIENT_ERROR(mysql, CR_UNKNOWN_ERROR, SQLSTATE_UNKNOWN, "tns_name/addr_list is null.");
+  }
+  if (tmp && success && len_success > 0) {
+    snprintf(success, len_success, "[%s]:%d", success_addr.host, success_addr.port);
   }
 
   return tmp;
