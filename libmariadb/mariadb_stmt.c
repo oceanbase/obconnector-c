@@ -1275,6 +1275,35 @@ static void store_param_oracle_timestamp_tz_complex(unsigned char **pos, MYSQL_C
   *(*pos - length - 1) = length;
 }
 
+static void store_param_oracle_interval_complex(unsigned char **pos, MYSQL_COMPLEX_BIND_HEADER *param)
+{
+  ORACLE_INTERVAL *interval = (ORACLE_INTERVAL *)param->buffer;
+  uchar buff[20] = {0};
+  int len = 0;
+
+  if (param->buffer_type == MYSQL_TYPE_OB_INTERVAL_YM) {
+    len = 8;
+    buff[0] = 7;
+    buff[1] = interval->data_symbol > 0 ? 0 : 1; //正 0， 负 1
+    int4store(buff + 2, interval->data_object.ym_object.ym_year);
+    buff[6] = (uchar)(interval->data_object.ym_object.ym_month);
+    buff[7] = (uchar)(interval->data_object.ym_object.ym_scale);
+  } else if (param->buffer_type == MYSQL_TYPE_OB_INTERVAL_DS) {
+    len = 15;
+    buff[0] = 14;
+    buff[1] = interval->data_symbol > 0 ? 0 : 1;  //正 0， 负 1
+    int4store(buff + 2, interval->data_object.ds_object.ds_day);
+    buff[6] = (uchar)(interval->data_object.ds_object.ds_hour);
+    buff[7] = (uchar)(interval->data_object.ds_object.ds_minute);
+    buff[8] = (uchar)(interval->data_object.ds_object.ds_second);
+    int4store(buff + 9, interval->data_object.ds_object.ds_frac_second);
+    buff[13] = (uchar)(interval->data_object.ds_object.ds_day_scale);
+    buff[14] = (uchar)(interval->data_object.ds_object.ds_frac_second_scale);
+  }
+  memcpy((char *)*pos, buff, len);
+  (*pos) += len;
+}
+
 static void store_param_str_complex(unsigned char **pos, MYSQL_COMPLEX_BIND_STRING *param)
 {
   /* param->length is always set in mysql_stmt_bind_param */
@@ -1452,6 +1481,10 @@ static void store_param_all_complex(unsigned char **pos, MYSQL_COMPLEX_BIND_HEAD
       break;
     case MYSQL_TYPE_OB_TIMESTAMP_WITH_TIME_ZONE:
       store_param_oracle_timestamp_tz_complex(pos, header);
+      break;
+    case MYSQL_TYPE_OB_INTERVAL_YM:
+    case MYSQL_TYPE_OB_INTERVAL_DS:
+      store_param_oracle_interval_complex(pos, header);
       break;
     case MYSQL_TYPE_TINY_BLOB:
     case MYSQL_TYPE_MEDIUM_BLOB:
@@ -1807,6 +1840,8 @@ int convert_type_to_complex(enum enum_field_types type)
     case MYSQL_TYPE_CURSOR:
     case MYSQL_TYPE_ORA_BLOB:
     case MYSQL_TYPE_ORA_CLOB:
+    case MYSQL_TYPE_OB_INTERVAL_DS:
+    case MYSQL_TYPE_OB_INTERVAL_YM:
     case MYSQL_TYPE_OB_TIMESTAMP_NANO:
     case MYSQL_TYPE_OB_TIMESTAMP_WITH_TIME_ZONE:
     case MYSQL_TYPE_OB_TIMESTAMP_WITH_LOCAL_TIME_ZONE:
@@ -3160,6 +3195,8 @@ int STDCALL mysql_stmt_prepare(MYSQL_STMT *stmt, const char *query, unsigned lon
   if (length == (unsigned long) -1)
     length= (unsigned long)strlen(query);
 
+  free_old_query(mysql);  //new query clean old feilds
+
   /* clear flags */
   CLEAR_CLIENT_STMT_ERROR(stmt);
   CLEAR_CLIENT_ERROR(stmt->mysql);
@@ -3370,6 +3407,12 @@ static int madb_alloc_stmt_fields(MYSQL_STMT *stmt)
       SET_CLIENT_STMT_ERROR(stmt, CR_OUT_OF_MEMORY, SQLSTATE_UNKNOWN, 0);
       return(1);
     }
+    if (!stmt->mysql->fields) {
+      if (stmt->mysql->net.last_errno == 0)
+        SET_CLIENT_STMT_ERROR(stmt, CR_NEW_STMT_METADATA, SQLSTATE_UNKNOWN, 0);
+      return(1);
+    }
+
     memset(stmt->fields, 0, sizeof(MYSQL_FIELD) * stmt->mysql->field_count);
     stmt->field_count= stmt->mysql->field_count;
 
@@ -3558,8 +3601,8 @@ int stmt_read_execute_response(MYSQL_STMT *stmt)
 
       /* Only cursor read */
       stmt->default_rset_handler = _mysql_stmt_use_result;
-
-    } else if (stmt->flags & CURSOR_TYPE_READ_ONLY)
+      stmt->state = MYSQL_STMT_WAITING_USE_OR_STORE;
+    } else if ((stmt->flags & CURSOR_TYPE_READ_ONLY) && !(stmt->upsert_status.server_status & SERVER_MORE_RESULTS_EXIST))
     {
       /*
          We have asked for CURSOR but got no cursor, because the condition
@@ -3571,6 +3614,8 @@ int stmt_read_execute_response(MYSQL_STMT *stmt)
          precached on client and server's resources are freed.
          */
 
+      if (stmt->mysql->status == MYSQL_STATUS_GET_RESULT)
+        stmt->mysql->status = MYSQL_STATUS_STMT_RESULT;
       /* preferred is buffered read */
       if (mysql_stmt_store_result(stmt))
         return 1;
@@ -3590,8 +3635,9 @@ int stmt_read_execute_response(MYSQL_STMT *stmt)
       } else {
         stmt->mysql->status= MYSQL_STATUS_STMT_RESULT;
       }
+      stmt->state = MYSQL_STMT_WAITING_USE_OR_STORE;
     }
-    stmt->state= MYSQL_STMT_WAITING_USE_OR_STORE;
+    //stmt->state= MYSQL_STMT_WAITING_USE_OR_STORE;
     /* in certain cases parameter types can change: For example see bug
        4026 (SELECT ?), so we need to update field information */
 //    if (mysql->field_count == stmt->field_count)
@@ -4523,7 +4569,7 @@ uint32 ob_crc32(uint64_t crc, const char *buf, int64_t len)
   return crc64 & 0xffffffff;
 }
 
-uint64 ob_crc64(uint64_t crc, const char *buf, int64_t len)
+uint64_t ob_crc64(uint64_t crc, const char *buf, int64_t len)
 {
   uint64_t crc64 = crc64_sse42_dispatch(crc, buf, len);
   return crc64;
@@ -5247,6 +5293,8 @@ mysql_stmt_prepare_v2(MYSQL_STMT *stmt, const char *query,
   */
   if (length == (unsigned long) -1)
     length= (unsigned long)strlen(query);
+
+  free_old_query(mysql);  //new query clean old feilds
 
   /* clear flags */
   CLEAR_CLIENT_STMT_ERROR(stmt);
@@ -6139,7 +6187,7 @@ mysql_stmt_read_piece_data(MYSQL_STMT *stmt, unsigned int param_number,
       *param->error = 1;
     } else {
       ulong copy_length = MIN(*ret_data_len, param->buffer_length);
-      memcpy(param->buffer, (char *)*row, copy_length);
+      memcpy(param->buffer, (char *)row, copy_length);
       *param->error = copy_length < *ret_data_len;
     }
     *param->length = *ret_data_len;

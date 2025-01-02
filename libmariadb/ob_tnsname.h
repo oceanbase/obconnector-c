@@ -149,6 +149,7 @@ struct obclient_description
   unsigned long         read_timout;        // 单次读的超时时间
   unsigned long         write_timout;       // 单次写的超时时间
   unsigned long         retry_timeout;      // 整个LB阶段的超时时间
+  ObClientLBOption      oblb_strategy;
   ObClientLBOption      oblb_group_strategy;
   ObClientBlacklistConf black_list_conf;
 };
@@ -178,6 +179,8 @@ struct obclient_connect_data
   unsigned int  service_name_len;
   char user_extra_info[OBCLIENT_TNS_KEY_SIZE];
   unsigned int  user_extra_info_len;
+  char session_variable[OBCLIENT_TNS_KEY_SIZE];
+  unsigned int  session_variable_len;
   unsigned long  ob_mode;
   unsigned long  use_default_sid;
 };
@@ -196,6 +199,7 @@ struct obclient_tns_parse_params
   char *description;
   int description_len;
   int description_offset;
+  int is_comment;
   ObClientTnsTokenType  tns_token_type;
   ObClientLBKeyType     key_type;
 };
@@ -214,7 +218,7 @@ int ObClientTnsServiceDisplay(ObClientTnsService *tns_service, FILE *display_fil
 int ObClientTnsServiceBuild(ObClientTns *tns, ObClientTnsParseParams *parse_params);
 int ObClientTnsServiceSkip(ObClientTnsParseParams *parse_params);
 // 非负载均衡模式下获取extra info
-int ObClientTnsServiceExtraInfoGet(ObClientTnsService *tns_service, char *extra_info, int *extra_info_len, int *ob_mode);
+int ObClientTnsServiceExtraInfoGet(ObClientTnsService *tns_service, char *extra_info, int *extra_info_len, int *ob_mode, char* session_variable, int *session_variable_len);
 // 非负载均衡模式下获取dblink, 直接获取第一个address，拼接dblink
 int ObClientTnsServiceDblinkGet(ObClientTnsService *tns_service, char *dblink, int *dblink_len);
 

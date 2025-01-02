@@ -5,7 +5,6 @@
 
 #include "mysql.h"
 #include "ma_global.h"
-#include "ob_object.h"
 #include "ob_full_link_trace.h"
 #include "ob_rwlock.h"
 

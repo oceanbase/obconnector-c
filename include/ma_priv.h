@@ -39,7 +39,7 @@ static inline uint ma_extended_type_info_rows(const MYSQL *mysql)
 
 static inline uint ma_result_set_rows(const MYSQL *mysql)
 {
-  return ma_has_extended_type_info(mysql) ? 9 : 8;
+  return ma_has_extended_type_info(mysql) ? 8 : 7;
 }
 
 MA_FIELD_EXTENSION *ma_field_extension_deep_dup(MA_MEM_ROOT *memroot,

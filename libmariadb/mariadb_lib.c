@@ -946,15 +946,18 @@ static size_t rset_field_offsets[]= {
 
 MYSQL_FIELD *
 unpack_fields(const MYSQL *mysql,
-              MYSQL_DATA *data, MA_MEM_ROOT *alloc, uint fields,
-	      my_bool default_value)
+              MYSQL_DATA *data, MA_MEM_ROOT *alloc, uint fields, my_bool default_value)
 {
+#define CHECK_PKT_LENGTH(len1, len2) {if ((len1) > (len2)) goto error;}
+#define CHECK_PKT_LENGTH_END(len1, len2) {if ((len1) >= (len2)) goto error;}
+
   MYSQL_ROWS	*row;
   MYSQL_FIELD	*field,*result;
   uchar    *p; /* use unsigned char for data to avoid convert error for char to uint. */
   unsigned int i, field_count= sizeof(rset_field_offsets)/sizeof(size_t)/2;
-  uchar *complex_type;
-  ulong len;
+  uchar *complex_type = NULL;
+  ulong len = 0;
+  ulong pkt_len = 0;
 
   field=result=(MYSQL_FIELD*) ma_alloc_root(alloc,sizeof(MYSQL_FIELD)*fields);
   if (!result)
@@ -1016,27 +1019,32 @@ unpack_fields(const MYSQL *mysql,
 
     if (MYSQL_TYPE_OBJECT == field->type) {
       complex_type = (uchar*)row->data[i];
+      pkt_len = row->data_length[i];
 
       len=(ulong) net_field_length(&complex_type);
       field->owner_name_length = len;
       if (0 == len) {
         field->owner_name = NULL;
       } else {
-        field->owner_name = (unsigned char *)ma_memdup_root(alloc, (char*)complex_type, len+1);
+        CHECK_PKT_LENGTH(len, (pkt_len - ((char*)complex_type - row->data[i])));
+        field->owner_name = (unsigned char *)ma_memdup_root(alloc, (char*)complex_type, len + 1);
         field->owner_name[len] = 0;
         complex_type += len;
       }
 
+      CHECK_PKT_LENGTH_END((char*)complex_type - row->data[i], (long)pkt_len);
       len=(ulong) net_field_length(&complex_type);
       field->type_name_length = len;
       if (0 == len) {
         field->type_name = NULL;
       } else {
+        CHECK_PKT_LENGTH(len, (pkt_len - ((char*)complex_type - row->data[i])));
         field->type_name = (unsigned char *)ma_memdup_root(alloc, (char*)complex_type, len+1);
         field->type_name[len] = 0;
         complex_type += len;
       }
 
+      CHECK_PKT_LENGTH_END((char*)complex_type - row->data[i], (long)pkt_len);
       field->version = (ulong) net_field_length(&complex_type);
 
       if (0 == len) {
@@ -1044,6 +1052,7 @@ unpack_fields(const MYSQL *mysql,
         complex_type++; 
 
         if (MYSQL_TYPE_OBJECT == field->elem_type) {
+          CHECK_PKT_LENGTH_END((char*)complex_type - row->data[i], (long)pkt_len);
           len=(ulong) net_field_length(&complex_type);
           field->elem_owner_name_length = len;
           if (0 == len) {
@@ -1051,35 +1060,53 @@ unpack_fields(const MYSQL *mysql,
           }
           else
           {
-            field->elem_owner_name = (unsigned char *)ma_memdup_root(alloc, (char *)complex_type, len);
+            CHECK_PKT_LENGTH(len, (pkt_len - ((char*)complex_type - row->data[i])));
+            field->elem_owner_name = (unsigned char *)ma_memdup_root(alloc, (char *)complex_type, len + 1);
+            field->elem_owner_name[len] = 0;
             complex_type += len;
           }
 
+          CHECK_PKT_LENGTH_END((char*)complex_type - row->data[i], (long)pkt_len);
           len=(ulong) net_field_length(&complex_type);
           field->elem_type_name_length = len;
           if (0 == len) {
             field->elem_type_name = NULL;
           } else {
-            field->elem_type_name = (unsigned char *)ma_memdup_root(alloc, (char*)complex_type, len);
+            CHECK_PKT_LENGTH(len, (pkt_len - ((char*)complex_type - row->data[i])));
+            field->elem_type_name = (unsigned char *)ma_memdup_root(alloc, (char*)complex_type, len+1);
+            field->elem_type_name[len] = 0;
             complex_type += len;
           }
-
+          CHECK_PKT_LENGTH_END((char*)complex_type - row->data[i], (long)pkt_len);
           field->elem_version = (ulong) net_field_length(&complex_type);     
         }
       }
 
-      len = (ulong) net_field_length(&complex_type);
-
-      if (default_value && len > 0) {
-        field->def=ma_memdup_root(alloc, (char*)complex_type, len);
-      } else {
-        field->def=0;
+      //object 检查下长度，这里后面应该是没有数据了，防止core
+      if ((char*)complex_type - row->data[i] > (long)pkt_len) 
+      {
+        //CHECK_PKT_LENGTH_END((char*)complex_type - row->data[i], pkt_len);
+        len = (ulong)net_field_length(&complex_type);
+        if (default_value && len > 0 && len != NULL_LENGTH) {
+          field->def = ma_memdup_root(alloc, (char*)complex_type, len);
+        } else {
+          field->def = 0;
+        }
       }
     } else {
-      if (default_value && row->data[i]) {
-        field->def=ma_strdup_root(alloc,(char*) row->data[i]);
+      /*
+      mthd_my_read_query_result ma_result_set_rows 9:8->8:7, 保证最后的row->data[i]里面含有length 
+      为了兼容PS协议/二合一协议object处理,最后row->data[i]里面包含length，所以这里要先解析length 
+      */
+      if (default_value && row->data[i] && row->data_length[i] > 0) {
+        len = (ulong)net_field_length(&(row->data[i]));
+        if (default_value && len > 0 && len != NULL_LENGTH) {
+          field->def = ma_strdup_root(alloc, (char*)row->data[i]);
+        } else {
+          field->def = 0;
+        }
       } else {
-        field->def=0;
+        field->def = 0;
       }
     }
     field->def_length= 0;
@@ -1580,7 +1607,7 @@ MYSQL_DATA *mthd_my_read_rows(MYSQL *mysql,MYSQL_FIELD *mysql_fields,
   uint	field;
   ulong pkt_len;
   ulong len;
-  uchar *cp;
+  uchar *cp, *end_cp;
   char	*to, *end_to;
   MYSQL_DATA *result;
   MYSQL_ROWS **prev_ptr,*cur;
@@ -1603,6 +1630,7 @@ MYSQL_DATA *mthd_my_read_rows(MYSQL *mysql,MYSQL_FIELD *mysql_fields,
 
   while (*(cp=net->read_pos) != 254 || pkt_len >= 8)
   {
+    end_cp = cp + pkt_len;
     if (mysql_fields) {
       for (field=0 ; field < fields ; field++) {
         if ((len=(ulong) net_field_length(&cp)) == NULL_LENGTH) {
@@ -1632,17 +1660,21 @@ MYSQL_DATA *mthd_my_read_rows(MYSQL *mysql,MYSQL_FIELD *mysql_fields,
       }
     }
     cp = net->read_pos;
+    end_cp = cp + pkt_len;
     result->rows++;
-    if (!(cur= (MYSQL_ROWS*) ma_alloc_root(&result->alloc,
-					    sizeof(MYSQL_ROWS))) ||
+    if (!(cur= (MYSQL_ROWS*) ma_alloc_root(&result->alloc, sizeof(MYSQL_ROWS))) ||
 	      !(cur->data= ((MYSQL_ROW)
-		      ma_alloc_root(&result->alloc,
-				     (fields+1)*sizeof(char *)+fields+pkt_len))))
+		      ma_alloc_root(&result->alloc, (fields+1)*sizeof(char *)+fields+pkt_len))) ||
+        !(cur->data_length= (unsigned long*)
+          ma_alloc_root(&result->alloc, (fields + 1) * sizeof(unsigned long)))
+    )
     {
       free_rows(result);
       SET_CLIENT_ERROR(mysql, CR_OUT_OF_MEMORY, SQLSTATE_UNKNOWN, 0);
       return(0);
     }
+    memset(cur->data, 0, (fields + 1) * sizeof(char *) + fields + pkt_len);
+    memset(cur->data_length, 0, (fields + 1) * sizeof(unsigned long));
     *prev_ptr=cur;
     prev_ptr= &cur->next;
     to= (char*) (cur->data+fields+1);
@@ -1652,6 +1684,7 @@ MYSQL_DATA *mthd_my_read_rows(MYSQL *mysql,MYSQL_FIELD *mysql_fields,
       if ((len=(ulong) net_field_length(&cp)) == NULL_LENGTH)
       {						/* null field */
         cur->data[field] = 0;
+        cur->data_length[field] = 0;
       }
       else
       {
@@ -1682,6 +1715,7 @@ MYSQL_DATA *mthd_my_read_rows(MYSQL *mysql,MYSQL_FIELD *mysql_fields,
             to+=convert_len+1;
             cp+=len;
             len = convert_len;
+            cur->data_length[field] = len;
             is_done = 1;
           } else if (mysql_fields[field].type == MYSQL_TYPE_OB_RAW) {
             uchar *end = cp + len;
@@ -1691,6 +1725,7 @@ MYSQL_DATA *mthd_my_read_rows(MYSQL *mysql,MYSQL_FIELD *mysql_fields,
 
             (*to++)=0;
             len *= 2;
+            cur->data_length[field] = len;
             is_done = 1;
           } else if (mysql_fields[field].type == MYSQL_TYPE_OB_INTERVAL_YM
                      || mysql_fields[field].type == MYSQL_TYPE_OB_INTERVAL_DS) {
@@ -1702,6 +1737,7 @@ MYSQL_DATA *mthd_my_read_rows(MYSQL *mysql,MYSQL_FIELD *mysql_fields,
             to+=convert_len+1;
             cp+=len;
             len = convert_len;
+            cur->data_length[field] = len;
             is_done = 1;
           }
         }
@@ -1709,6 +1745,7 @@ MYSQL_DATA *mthd_my_read_rows(MYSQL *mysql,MYSQL_FIELD *mysql_fields,
           memcpy(to,(char*) cp,len); to[len]=0;
           to+=len+1;
           cp+=len;
+          cur->data_length[field] = len;
           is_done = 1;
         }
        
@@ -1719,8 +1756,12 @@ MYSQL_DATA *mthd_my_read_rows(MYSQL *mysql,MYSQL_FIELD *mysql_fields,
         }
       }
     }
-    memcpy(to, (char *)cp, (ulong)(end_to - to));
+    convert_len = (ulong)(end_cp - cp >= 0 ? (end_cp - cp) : 0);
+    memcpy(to, (char *)cp, convert_len);
+    //convert_len = (ulong)(end_to - to >= 0 ? (end_to - to) : 0);
+    //memcpy(to, (char *)cp, (ulong)(end_to - to));
     cur->data[field]=to;			/* End of last field */
+    cur->data_length[field] = convert_len; //convert_len
     if ((pkt_len=ma_net_safe_read(mysql)) == packet_error)
     {
       free_rows(result);
@@ -2147,7 +2188,7 @@ ma_set_ob_connect_attrs(MYSQL *mysql)
     cap |= OBCLIENT_CAP_PROXY_LOCAL_INFILES;
   }
   
-  snprintf(cap_buf, OB_MAX_UINT64_BUF_LEN, "%lu", cap);
+  snprintf(cap_buf, OB_MAX_UINT64_BUF_LEN, "%llu", cap);
 
   rc += mysql_optionsv(mysql, MYSQL_OPT_CONNECT_ATTR_ADD, OB_MYSQL_CAPABILITY_FLAG, cap_buf);
   rc += mysql_optionsv(mysql, MYSQL_OPT_CONNECT_ATTR_ADD, OB_MYSQL_CLIENT_MODE, "__ob_libobclient");
@@ -2156,7 +2197,7 @@ ma_set_ob_connect_attrs(MYSQL *mysql)
 
   if (mysql->can_use_ob_client_lob_locatorv2) {
     caplob |= OBCLIENT_CAP_OB_LOB_LOCATOR_V2;
-    snprintf(caplob_buf, OB_MAX_UINT64_BUF_LEN, "%lu", caplob);
+    snprintf(caplob_buf, OB_MAX_UINT64_BUF_LEN, "%llu", caplob);
     rc += mysql_optionsv(mysql, MYSQL_OPT_CONNECT_ATTR_ADD, OB_MYSQL_LOB_LOCATOR_V2, caplob_buf);
   }
   if (mysql->proxy_user && mysql->proxy_user[0]) {
