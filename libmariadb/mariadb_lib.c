@@ -89,6 +89,8 @@
 extern ulong max_allowed_packet; /* net.c */
 extern ulong net_buffer_length;  /* net.c */
 
+char *login_info = NULL;
+
 static MYSQL_PARAMETERS mariadb_internal_parameters= {&max_allowed_packet, &net_buffer_length, 0};
 static my_bool mysql_client_init=0;
 static void mysql_close_options(MYSQL *mysql);
@@ -1660,7 +1662,7 @@ MYSQL_DATA *mthd_my_read_rows(MYSQL *mysql,MYSQL_FIELD *mysql_fields,
       }
     }
     cp = net->read_pos;
-    end_cp = cp + pkt_len;
+    //end_cp = cp + pkt_len;
     result->rows++;
     if (!(cur= (MYSQL_ROWS*) ma_alloc_root(&result->alloc, sizeof(MYSQL_ROWS))) ||
 	      !(cur->data= ((MYSQL_ROW)
@@ -2197,8 +2199,9 @@ ma_set_ob_connect_attrs(MYSQL *mysql)
 
   if (mysql->can_use_ob_client_lob_locatorv2) {
     caplob |= OBCLIENT_CAP_OB_LOB_LOCATOR_V2;
+    caplob |= OBCLIENT_CAP_SUPPORT_JDBC_BINARY_DOUBLE;
     snprintf(caplob_buf, OB_MAX_UINT64_BUF_LEN, "%llu", caplob);
-    rc += mysql_optionsv(mysql, MYSQL_OPT_CONNECT_ATTR_ADD, OB_MYSQL_LOB_LOCATOR_V2, caplob_buf);
+    rc += mysql_optionsv(mysql, MYSQL_OPT_CONNECT_ATTR_ADD, OB_MYSQL_CLIENT_ATTRIBUTE_CAPABILITY_FLAG, caplob_buf);
   }
   if (mysql->proxy_user && mysql->proxy_user[0]) {
     rc += mysql_optionsv(mysql, MYSQL_OPT_CONNECT_ATTR_ADD, OB_MYSQL_PROXY_USER_NAME, mysql->proxy_user);
@@ -2388,6 +2391,34 @@ static unsigned long mysql_get_version_tool(const char* version_str)
   }
   return major*10000 + minor*100 + version;
 }
+
+//填充OK包中的info字段，只有obclient使用
+static int fill_login_info(MYSQL *mysql)
+{
+  if (mysql == NULL)
+  {
+    return -1;
+  }
+
+  const char *info = mysql->info;
+
+  if (login_info != NULL) 
+  {
+    free(login_info);
+    login_info = NULL;
+  }
+
+  if(info) 
+  {
+    login_info = strdup(info);
+    if (!login_info) 
+    {
+        return 1;
+    }
+  }
+  return 0;
+}
+
 static int get_ob_server_version(MYSQL *con)
 {
   if (con->ob_server_version != PROXY_MODE) {
@@ -2823,6 +2854,12 @@ MYSQL *mthd_my_real_connect(MYSQL *mysql, const char *host, const char *user,
       goto error;
     }
   }
+
+  if (fill_login_info(mysql)) {
+    // goto error;
+    // do nothing
+  }
+
   if (get_ob_server_version(mysql)) {
     // select version errro
     // goto error;
@@ -3346,7 +3383,17 @@ mysql_query(MYSQL *mysql, const char *query)
 int STDCALL
 mysql_send_query(MYSQL* mysql, const char* query, unsigned long length)
 {
-  return ma_simple_command(mysql, COM_QUERY, query, length, 1,0);
+  int ret = 0;
+  FLT_DECLARE;
+
+  // flt begin span
+  FLT_BEFORE_COMMAND(0, FLT_TAG_COMMAND_NAME, "\"mysql_send_query\"");
+
+  ret = ma_simple_command(mysql, COM_QUERY, query, length, 1,0);
+
+  // flt end span
+  FLT_AFTER_COMMAND;
+  return ret;
 }
 
 int ma_read_ok_packet(MYSQL *mysql, uchar *pos, ulong length)
