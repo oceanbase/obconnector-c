@@ -2,6 +2,7 @@
 
 #include <errno.h>
 #include <stdio.h>
+#include <string.h>
 #include <ma_global.h>
 #include <ob_oralce_format_models.h>
 

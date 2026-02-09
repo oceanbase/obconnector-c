@@ -22,6 +22,10 @@
 
 #include "ob_cond.h"
 
+#ifndef _WIN32
+#include <sys/time.h>
+#endif
+
 #ifdef _WIN32
 #include <time.h>
 #include <limits.h>
