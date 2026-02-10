@@ -1,4 +1,8 @@
 #!/bin/bash
+
+# Detect platform
+OS_KERNEL="$(uname -s)"
+
 function clean()
 {
   rm -rf CMakeFiles CMakeCache.txt
@@ -14,4 +18,13 @@ cmake . \
 -DENABLED_LOCAL_INFILE=1 \
 -DDEFAULT_CHARSET=utf8
 
-make -j `cat /proc/cpuinfo | grep processor| wc -l`
+#-DCMAKE_BUILD_TYPE=DEBUG \
+#-DCMAKE_C_FLAGS_DEBUG="-g -O0" \
+#-DCMAKE_CXX_FLAGS_DEBUG="-g -O0" \
+
+# Parallel build: detect CPU count per platform
+if [[ "$OS_KERNEL" == "Darwin" ]]; then
+  make -j $(sysctl -n hw.ncpu)
+else
+  make -j $(cat /proc/cpuinfo | grep processor | wc -l)
+fi
