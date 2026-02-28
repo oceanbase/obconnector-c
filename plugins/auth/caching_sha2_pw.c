@@ -72,7 +72,7 @@ extern BCRYPT_ALG_HANDLE Sha256Prov;
 */
 static unsigned char is_connection_secure(MYSQL *mysql)
 {
-  if (mysql->options.use_ssl ||
+  if ((mysql->options.use_ssl && mysql->server_capabilities & CLIENT_SSL) ||
       mysql->net.pvio->type != PVIO_TYPE_SOCKET)
     return 1;
   return 0;

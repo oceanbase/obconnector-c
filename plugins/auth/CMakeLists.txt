@@ -73,7 +73,7 @@ IF(CRYPTO_PLUGIN)
                 DEFAULT DYNAMIC
                 SOURCES ${CC_SOURCE_DIR}/plugins/auth/caching_sha2_pw.c 
                         ${CRYPT_SOURCE}
-                LIBRARIES ${CRYPT_LIBS})
+                LIBRARIES ${CRYPT_LIBS} ${SYSTEM_LIBS})
 
   IF(WITH_SSL STREQUAL "GNUTLS" AND NOT WIN32)
     MESSAGE1(STATUS "sha256_password not supported by GnuTLS due to missing OAEP padding")

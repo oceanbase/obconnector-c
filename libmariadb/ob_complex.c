@@ -39,13 +39,15 @@ static void global_hash_free(void *record);
 "  NULL LENGTH, "\
 "  NULL NUMBER_PRECISION, "\
 "  NULL SCALE, "\
-"  NULL CHARACTER_SET_NAME "\
+"  NULL CHARACTER_SET_NAME, "\
+"  NULL ATTR_NAME, " \
+"  -1 UPPER_BOUND " \
 "FROM "\
 "  USER_TYPES A WHERE TYPE_NAME = '%s' "\
 "UNION "\
 "( "\
 "  WITH  "\
-"  CTE_RESULT(PARENT_OWNER, PARENT_TYPE, CHILD_TYPE, ATTR_NO, CHILD_TYPE_OWNER, ATTR_TYPE_CODE, LENGTH, NUMBER_PRECISION, SCALE, CHARACTER_SET_NAME)  "\
+"  CTE_RESULT(PARENT_OWNER, PARENT_TYPE, CHILD_TYPE, ATTR_NO, CHILD_TYPE_OWNER, ATTR_TYPE_CODE, LENGTH, NUMBER_PRECISION, SCALE, CHARACTER_SET_NAME, ATTR_NAME, UPPER_BOUND)  "\
 "  AS ( "\
 "    SELECT "\
 "      SYS_CONTEXT('USERENV','CURRENT_USER') PARENT_OWNER, "\
@@ -57,7 +59,9 @@ static void global_hash_free(void *record);
 "      B.LENGTH LENGTH, "\
 "      B.NUMBER_PRECISION NUMBER_PRECISION, "\
 "      B.SCALE SCALE, "\
-"      B.CHARACTER_SET_NAME CHARACTER_SET_NAME "\
+"      B.CHARACTER_SET_NAME CHARACTER_SET_NAME, "\
+"      NULL ATTR_NAME, "\
+"      B.UPPER_BOUND UPPER_BOUND"\
 "    FROM "\
 "      USER_COLL_TYPES B LEFT JOIN USER_TYPES A ON A.TYPE_NAME = B.ELEM_TYPE_NAME "\
 "    UNION "\
@@ -71,10 +75,12 @@ static void global_hash_free(void *record);
 "      B.LENGTH LENGTH, "\
 "      B.NUMBER_PRECISION NUMBER_PRECISION, "\
 "      B.SCALE SCALE, "\
-"      B.CHARACTER_SET_NAME CHARACTER_SET_NAME "\
+"      B.CHARACTER_SET_NAME CHARACTER_SET_NAME, "\
+"      B.ATTR_NAME ATTR_NAME, "\
+"      -1 UPPER_BOUND "\
 "    FROM USER_TYPE_ATTRS B LEFT JOIN USER_TYPES A ON B.ATTR_TYPE_NAME = A.TYPE_NAME ORDER BY ATTR_NO "\
 "  ) , "\
-"  CTE(DEPTH, PARENT_OWNER, PARENT_TYPE, CHILD_TYPE, ATTR_NO, CHILD_TYPE_OWNER, ATTR_TYPE_CODE, LENGTH, NUMBER_PRECISION, SCALE, CHARACTER_SET_NAME) "\
+"  CTE(DEPTH, PARENT_OWNER, PARENT_TYPE, CHILD_TYPE, ATTR_NO, CHILD_TYPE_OWNER, ATTR_TYPE_CODE, LENGTH, NUMBER_PRECISION, SCALE, CHARACTER_SET_NAME, ATTR_NAME, UPPER_BOUND) "\
 "  AS ( "\
 "    SELECT "\
 "      1 DEPTH, "\
@@ -86,7 +92,10 @@ static void global_hash_free(void *record);
 "      ATTR_TYPE_CODE, "\
 "      LENGTH, "\
 "      NUMBER_PRECISION, "\
-"      SCALE, CHARACTER_SET_NAME "\
+"      SCALE, "\
+"      CHARACTER_SET_NAME, "\
+"      ATTR_NAME, "\
+"      UPPER_BOUND "\
 "    FROM CTE_RESULT WHERE PARENT_TYPE = '%s' "\
 "    UNION ALL "\
 "    SELECT "\
@@ -100,7 +109,9 @@ static void global_hash_free(void *record);
 "      CTE_RESULT.LENGTH, "\
 "      CTE_RESULT.NUMBER_PRECISION, "\
 "      CTE_RESULT.SCALE, "\
-"      CTE_RESULT.CHARACTER_SET_NAME "\
+"      CTE_RESULT.CHARACTER_SET_NAME, "\
+"      CTE_RESULT.ATTR_NAME, "\
+"      CTE_RESULT.UPPER_BOUND "\
 "    FROM CTE_RESULT INNER JOIN CTE ON CTE_RESULT.PARENT_TYPE = CTE.CHILD_TYPE "\
 "  ) "\
 "  SELECT * FROM CTE "\
@@ -118,13 +129,15 @@ static void global_hash_free(void *record);
 "    NULL LENGTH, "\
 "    NULL NUMBER_PRECISION, "\
 "    NULL SCALE, "\
-"    NULL CHARACTER_SET_NAME "\
+"    NULL CHARACTER_SET_NAME, "\
+"    NULL ATTR_NAME, " \
+"    -1 UPPER_BOUND " \
 "  FROM "\
 "    ALL_TYPES A WHERE TYPE_NAME = '%s' AND OWNER = '%s' "\
 "  UNION "\
 "  ( "\
 "  WITH "\
-"  CTE_RESULT(PARENT_OWNER, PARENT_TYPE, CHILD_TYPE, ATTR_NO, CHILD_TYPE_OWNER, ATTR_TYPE_CODE, LENGTH, NUMBER_PRECISION, SCALE, CHARACTER_SET_NAME) "\
+"  CTE_RESULT(PARENT_OWNER, PARENT_TYPE, CHILD_TYPE, ATTR_NO, CHILD_TYPE_OWNER, ATTR_TYPE_CODE, LENGTH, NUMBER_PRECISION, SCALE, CHARACTER_SET_NAME, ATTR_NAME,UPPER_BOUND ) "\
 "  AS ( "\
 "      SELECT "\
 "        B.OWNER PARENT_OWNER, "\
@@ -136,7 +149,9 @@ static void global_hash_free(void *record);
 "        B.LENGTH LENGTH, "\
 "        B.NUMBER_PRECISION NUMBER_PRECISION, "\
 "        B.SCALE SCALE, "\
-"        B.CHARACTER_SET_NAME CHARACTER_SET_NAME "\
+"        B.CHARACTER_SET_NAME CHARACTER_SET_NAME, "\
+"        NULL ATTR_NAME, "\
+"        B.UPPER_BOUND UPPER_BOUND"\
 "      FROM "\
 "        ALL_COLL_TYPES B LEFT JOIN ALL_TYPES A ON A.TYPE_NAME = B.ELEM_TYPE_NAME AND A.OWNER = B.ELEM_TYPE_OWNER "\
 "      UNION "\
@@ -150,10 +165,12 @@ static void global_hash_free(void *record);
 "        B.LENGTH LENGTH, "\
 "        B.NUMBER_PRECISION NUMBER_PRECISION, "\
 "        B.SCALE SCALE, "\
-"        B.CHARACTER_SET_NAME CHARACTER_SET_NAME "\
+"        B.CHARACTER_SET_NAME CHARACTER_SET_NAME, "\
+"        B.ATTR_NAME ATTR_NAME, "\
+"        -1 UPPER_BOUND "\
 "      FROM ALL_TYPE_ATTRS B LEFT JOIN ALL_TYPES A ON A.TYPE_NAME = B.ATTR_TYPE_NAME AND A.OWNER = B.ATTR_TYPE_OWNER ORDER BY ATTR_NO "\
 "  ) , "\
-"  CTE(DEPTH, PARENT_OWNER, PARENT_TYPE, CHILD_TYPE, ATTR_NO, CHILD_TYPE_OWNER, ATTR_TYPE_CODE, LENGTH, NUMBER_PRECISION, SCALE, CHARACTER_SET_NAME) "\
+"  CTE(DEPTH, PARENT_OWNER, PARENT_TYPE, CHILD_TYPE, ATTR_NO, CHILD_TYPE_OWNER, ATTR_TYPE_CODE, LENGTH, NUMBER_PRECISION, SCALE, CHARACTER_SET_NAME, ATTR_NAME,UPPER_BOUND) "\
 "  AS ( "\
 "    SELECT "\
 "      1 DEPTH, "\
@@ -165,7 +182,10 @@ static void global_hash_free(void *record);
 "      ATTR_TYPE_CODE, "\
 "      LENGTH, "\
 "      NUMBER_PRECISION, "\
-"      SCALE, CHARACTER_SET_NAME "\
+"      SCALE, "\
+"      CHARACTER_SET_NAME, "\
+"      ATTR_NAME, "\
+"      UPPER_BOUND "\
 "    FROM CTE_RESULT WHERE PARENT_TYPE = '%s' AND PARENT_OWNER = '%s' "\
 "    UNION ALL "\
 "    SELECT "\
@@ -179,7 +199,9 @@ static void global_hash_free(void *record);
 "      CTE_RESULT.LENGTH, "\
 "      CTE_RESULT.NUMBER_PRECISION, "\
 "      CTE_RESULT.SCALE, "\
-"      CTE_RESULT.CHARACTER_SET_NAME "\
+"      CTE_RESULT.CHARACTER_SET_NAME, "\
+"      CTE_RESULT.ATTR_NAME, "\
+"      CTE_RESULT.UPPER_BOUND "\
 "    FROM CTE_RESULT INNER JOIN CTE ON CTE_RESULT.PARENT_TYPE = CTE.CHILD_TYPE AND CTE_RESULT.PARENT_OWNER = CTE.CHILD_TYPE_OWNER "\
 "  ) "\
 "  SELECT * FROM CTE "\
@@ -191,6 +213,12 @@ static void global_hash_free(void *record);
 #define ATTR_NO_INDEX 4
 #define CHILD_OWNER_INDEX 5
 #define ATTR_TYPE_INDEX 6
+#define ATTR_LENGTH_INDEX 7
+#define ATTR_PRECISION_INDEX 8
+#define ATTR_SCALE_INDEX 9
+#define ATTR_CHARSET_INDEX 10
+#define ATTR_NAME_INDEX 11
+#define ATTR_UPPER_BOUND_INDEX 12
 
 static enum_types convert_type(const char *type) {
   if (!strcmp(type, "COLLECTION")) {
@@ -209,6 +237,8 @@ static enum_types convert_type(const char *type) {
     return TYPE_RAW;
   } else if (!strcmp(type, "NVARCHAR2")) {
     return TYPE_NVARCHAR2;
+  } else if (!strcmp(type, "NCHAR")) {
+    return TYPE_OB_NCHAR;
   } else if (!strcmp(type, "FLOAT")) {
     return TYPE_OB_NUMBER_FLOAT;
   } else if (!strncmp(type, "INTERVAL YEAR", 13)) {
@@ -227,28 +257,55 @@ static enum_types convert_type(const char *type) {
     return TYPE_FLOAT;
   } else if (!strcmp(type, "BINARY_DOUBLE")) {
     return TYPE_DOUBLE;
+  } else if (!strcmp(type, "XMLTYPE")) {
+    return TYPE_XMLTYPE;
   } else {
     return TYPE_MAX;
   }
 }
 
+static int is_xmltype(MYSQL_ROW cur) {
+  int ret = 0;
+  if (cur && cur[DEPTH_INDEX] && cur[CHILD_TYPE_INDEX] && cur[ATTR_NO_INDEX] && cur[CHILD_OWNER_INDEX]) {
+    if (0 == atoi(cur[DEPTH_INDEX]) && 0 == atoi(cur[ATTR_NO_INDEX]) &&
+      7 == strlen(cur[CHILD_TYPE_INDEX]) && 0 == strncasecmp(cur[CHILD_TYPE_INDEX], "XMLTYPE", 7) &&
+      3 == strlen(cur[CHILD_OWNER_INDEX]) && 0 == strncasecmp(cur[CHILD_OWNER_INDEX], "SYS", 3)) {
+      ret = 1;
+    }
+  }
+  return ret;
+}
+
 static int STDCALL
 parser_complex(MYSQL_RES *result, OB_HASH *hash)
 {
-  MYSQL_ROW cur; 
-
-  COMPLEX_TYPE *complex_type;
-  unsigned char *parent_name;
-  COMPLEX_TYPE *parent;
+  MYSQL_ROW cur = NULL; 
+  COMPLEX_TYPE *complex_type = NULL;
+  unsigned char *parent_name = NULL;
+  COMPLEX_TYPE *parent = NULL;
   while ((cur = mysql_fetch_row(result))) {
     unsigned int type_size;
-    enum_types type = convert_type(cur[ATTR_TYPE_INDEX]);
+    enum_types type;
 
-    if (TYPE_OBJECT == type || TYPE_COLLECTION == type) {
+    //xmltype
+    if (1 == is_xmltype(cur)) {
+      type = TYPE_XMLTYPE;
+    } else{
+      type = convert_type(cur[ATTR_TYPE_INDEX]);
+    }
+
+    if (TYPE_OBJECT == type || TYPE_COLLECTION == type || TYPE_XMLTYPE == type) {
       complex_type = (COMPLEX_TYPE *) hash_search(hash, (unsigned char*)cur[CHILD_TYPE_INDEX], strlen(cur[CHILD_TYPE_INDEX]));
 
       if (!complex_type) {
-        type_size = TYPE_COLLECTION == type ? sizeof(COMPLEX_TYPE_COLLECTION) : sizeof(COMPLEX_TYPE_OBJECT);
+        if (TYPE_COLLECTION == type) {
+          type_size = sizeof(COMPLEX_TYPE_COLLECTION);
+        } else if (TYPE_XMLTYPE == type) {
+          type_size = sizeof(COMPLEX_TYPE_XMLTYPE);
+        } else {
+          type_size = sizeof(COMPLEX_TYPE_OBJECT);
+        }
+        //type_size = TYPE_COLLECTION == type ? sizeof(COMPLEX_TYPE_COLLECTION) : sizeof(COMPLEX_TYPE_OBJECT);
         complex_type = (COMPLEX_TYPE *) calloc(1, type_size);
 
         if (!complex_type) {
@@ -274,6 +331,13 @@ parser_complex(MYSQL_RES *result, OB_HASH *hash)
           ((COMPLEX_TYPE_OBJECT *)complex_type)->attr_no = 0;
         }
       }
+
+      //xmltype child type is varchar
+      if (TYPE_XMLTYPE == complex_type->type) {
+        COMPLEX_TYPE_XMLTYPE *tmp = (COMPLEX_TYPE_XMLTYPE*)complex_type;
+        tmp->child.type = TYPE_VARCHAR2;
+        tmp->header.is_valid = 1;
+      }
     }
 
     if (atoi(cur[DEPTH_INDEX]) != 0) {
@@ -292,7 +356,6 @@ parser_complex(MYSQL_RES *result, OB_HASH *hash)
   }
 
   result->data_cursor = result->data->data;
-
   while ((cur = mysql_fetch_row(result))) {
     enum_types child_type;
     COMPLEX_TYPE_OBJECT *parent_object;
@@ -320,6 +383,14 @@ parser_complex(MYSQL_RES *result, OB_HASH *hash)
         }
 
         parent_object->child[atoi(cur[ATTR_NO_INDEX]) - 1].type = child_type;
+        //parent_object->child[atoi(cur[ATTR_NO_INDEX]) - 1].attr_length = atoi(cur[ATTR_LENGTH_INDEX]);
+        //parent_object->child[atoi(cur[ATTR_NO_INDEX]) - 1].attr_precision = atoi(cur[ATTR_PRECISION_INDEX]);
+        //parent_object->child[atoi(cur[ATTR_NO_INDEX]) - 1].attr_scale = atoi(cur[ATTR_SCALE_INDEX]);
+        //parent_object->child[atoi(cur[ATTR_NO_INDEX]) - 1].attr_upper_bound = atoi(cur[ATTR_UPPER_BOUND_INDEX]);
+        //if (cur[ATTR_NAME_INDEX]) {
+        //  int length = strlen(cur[ATTR_NAME_INDEX]);
+        //  memcpy(parent_object->child[atoi(cur[ATTR_NO_INDEX]) - 1].attr_name, cur[ATTR_NAME_INDEX], length);
+        //}
 
         if (TYPE_COLLECTION == child_type || TYPE_OBJECT == child_type) {
           complex_type = (COMPLEX_TYPE *)hash_search(hash,
@@ -342,6 +413,14 @@ parser_complex(MYSQL_RES *result, OB_HASH *hash)
         parent_collection = (COMPLEX_TYPE_COLLECTION *)parent;
 
         parent_collection->child.type = child_type;
+        //parent_collection->child.attr_length = atoi(cur[ATTR_LENGTH_INDEX]);
+        //parent_collection->child.attr_precision = atoi(cur[ATTR_PRECISION_INDEX]);
+        //parent_collection->child.attr_scale = atoi(cur[ATTR_SCALE_INDEX]);
+        //parent_collection->child.attr_upper_bound = atoi(cur[ATTR_UPPER_BOUND_INDEX]);
+        //if (cur[ATTR_NAME_INDEX]) {
+        //  int length = strlen(cur[ATTR_NAME_INDEX]);
+        //  memcpy(parent_collection->child.attr_name, cur[ATTR_NAME_INDEX], length);
+        //}
 
         if (TYPE_COLLECTION == child_type || TYPE_OBJECT == child_type) {
           complex_type = (COMPLEX_TYPE *)hash_search(hash,

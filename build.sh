@@ -11,10 +11,16 @@ clean
 
 TOP_DIR=$(cd "$(dirname "$0")";pwd)
 DEP_DIR=${TOP_DIR}/deps/3rd/usr/local/oceanbase/deps/devel
+cd ${TOP_DIR}/deps/3rd/
+bash dep_create.sh
 
+cd ${TOP_DIR}
 cmake . \
--DCMAKE_INSTALL_PREFIX=/app/mariadb \
--DWITH_SSL=$DEP_DIR \
+-DCMAKE_INSTALL_PREFIX=/u01/obclient \
+-DWITH_SSL=OPENSSL \
+-DOPENSSL_INCLUDE_DIR=$DEP_DIR/include \
+-DOPENSSL_SSL_LIBRARY=$DEP_DIR/lib/libssl.a \
+-DOPENSSL_CRYPTO_LIBRARY=$DEP_DIR/lib/libcrypto.a \
 -DENABLED_LOCAL_INFILE=1 \
 -DDEFAULT_CHARSET=utf8
 

@@ -374,6 +374,7 @@ static int post_session_variable(MYSQL *mysql, char *session_variable, int sessi
 static MYSQL* connect_by_addresslist(MYSQL* mysql, int64_t lb_starttime, ObLbAddressList *addr_list, ObClientLbConfig *config,
   const char *user, const char *passwd, const char *db, const char *unix_socket, unsigned long client_flag, ObClientLbAddress* success)
 {
+  static long inited = 0;
   ObLbAddress *address = NULL;
   MYSQL* tmp = NULL;
   unsigned int i = 0;
@@ -416,6 +417,11 @@ static MYSQL* connect_by_addresslist(MYSQL* mysql, int64_t lb_starttime, ObLbAdd
   char *mysql_opt_ssl_crlpath = NULL;
   char *mysql_opt_tls_version = NULL;
   
+  //Prevent multiple threads from entering at the same time
+  if (0 == ATOMIC_CAS_LONG(&inited, 0, 1)) {
+    srand(time(NULL));
+  }
+
   if (mysql == NULL || addr_list == NULL || config == NULL || addr_list->add_arr == NULL || addr_list->count <= 0) {
     SET_CLIENT_ERROR(mysql, CR_UNKNOWN_ERROR, SQLSTATE_UNKNOWN, "invalid handle or address list is zero.");
     return NULL;
@@ -436,7 +442,6 @@ static MYSQL* connect_by_addresslist(MYSQL* mysql, int64_t lb_starttime, ObLbAdd
     init_connect_info(&(addr_list->add_arr[i]));
   }
   lb_endtime = lb_starttime + config->retry_timeout * 1000;
-  srand(time(NULL));
 
   //init mysql options
   mysql_connect_timeout = config->mysql_connect_timeout;
@@ -593,6 +598,7 @@ static MYSQL* connect_by_tnsname(MYSQL* mysql, int64_t lb_starttime, const char*
   char session_variable[1024] = { 0 };
   char new_user_name[256] = { 0 };
   int user_len = strlen((const char *)user ? user : "");
+  int ob_enable_ssl = 0;
   int64_t lb_endtime = 0;
 
   if (NULL == tns_name || NULL == config) {
@@ -619,6 +625,8 @@ static MYSQL* connect_by_tnsname(MYSQL* mysql, int64_t lb_starttime, const char*
       if (des->connect_data->user_extra_info_len > 0) {
         strncpy(new_user_name + user_len, (const char *)des->connect_data->user_extra_info, des->connect_data->user_extra_info_len);
       }
+      if (des->connect_data->ob_enable_ssl > 0)
+        ob_enable_ssl = 1;
     }
 
     //tns config
@@ -632,6 +640,8 @@ static MYSQL* connect_by_tnsname(MYSQL* mysql, int64_t lb_starttime, const char*
     if (des->connect_timout > 0) config->mysql_connect_timeout = des->connect_timout;
     if (des->read_timout > 0) config->mysql_read_timeout = des->read_timout;
     if (des->write_timout > 0) config->mysql_write_timeout = des->write_timout;
+    if (ob_enable_ssl > 0) config->mysql_opt_use_ssl = 1;
+
     lb_endtime = lb_starttime + config->retry_timeout * 1000;
 
     for (i = 0; i < des->address_list_count; i++) {
@@ -651,6 +661,11 @@ static MYSQL* connect_by_tnsname(MYSQL* mysql, int64_t lb_starttime, const char*
         if (des && des->connect_data && des->connect_data->session_variable_len > 0) {
           post_session_variable(tmp, des->connect_data->session_variable, des->connect_data->session_variable_len);
         }
+        break;
+      }
+
+      if (config->retry_all_downs <= 0) {
+        SET_CLIENT_ERROR(mysql, CR_UNKNOWN_ERROR, SQLSTATE_UNKNOWN, "retry_all_downs is zero.");
         break;
       }
 

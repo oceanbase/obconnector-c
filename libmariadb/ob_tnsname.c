@@ -74,13 +74,13 @@ static const char *tns_key_9[] = {0};
 static const char *tns_key_10[] = {"RETRYTIMES"};
 static const char *tns_key_11[] = {"DESCRIPTION", "RETRY_TIMES"};
 static const char *tns_key_12[] = {"ADDRESS_LIST", "CONNECT_DATA", "SERVICE_NAME"};
-static const char *tns_key_13[] = {"OBLB_STRATEGY"};
+static const char *tns_key_13[] = {"OBLB_STRATEGY", "OB_ENABLE_SSL"};
 static const char *tns_key_14[] = {"OBLB_BLACKLIST"};
 static const char *tns_key_15[] = {"REMOVE_STRATEGY", "APPEND_STRATEGY", "USE_DEFAULT_SID"};
 static const char *tns_key_16[] = {"SESSION_VARIABLE"};
 static const char *tns_key_17[] = {"OBLB_READ_TIMEOUT"};
 static const char *tns_key_18[] = {"OB_USER_EXTRA_INFO", "OBLB_RETRY_TIMEOUT", "OBLB_WRITE_TIMEOUT"};
-static const char *tns_key_19[] = {"OBLB_GROUP_STRATEGY"};
+static const char *tns_key_19[] = {"OBLB_GROUP_STRATEGY", "OB_SESSION_VARIABLE"};
 static const char *tns_key_20[] = {"OBLB_RETRY_ALL_DOWNS", "OBLB_CONNECT_TIMEOUT"};
 
 static ObClientLBKeyType tns_keytype_0[] = { OBCLIENT_LB_ERROR_KEY };
@@ -96,13 +96,13 @@ static ObClientLBKeyType tns_keytype_9[] = { OBCLIENT_LB_ERROR_KEY };
 static ObClientLBKeyType tns_keytype_10[] = { OBCLIENT_LB_RETRY_TIMES };
 static ObClientLBKeyType tns_keytype_11[] = { OBCLIENT_LB_DESCRIPTION, OBCLIENT_LB_RETRY_TIMES };
 static ObClientLBKeyType tns_keytype_12[] = { OBCLIENT_LB_ADDRESS_LIST, OBCLIENT_LB_CONNECT_DATA, OBCLIENT_LB_SERVICE_NAME};
-static ObClientLBKeyType tns_keytype_13[] = { OBCLIENT_LB_OBLB_STRATEGY};
+static ObClientLBKeyType tns_keytype_13[] = { OBCLIENT_LB_OBLB_STRATEGY, OBCLIENT_LB_OB_ENABLE_SSL};
 static ObClientLBKeyType tns_keytype_14[] = { OBCLIENT_LB_OBLB_BLACKLIST};
 static ObClientLBKeyType tns_keytype_15[] = { OBCLIENT_LB_REMOVE_STRATEGY, OBCLIENT_LB_APPEND_STRATEGY, OBCLIENT_LB_USE_DEFAULT_SID};
 static ObClientLBKeyType tns_keytype_16[] = { OBCLIENT_LB_SESSION_VARIABLE};
 static ObClientLBKeyType tns_keytype_17[] = { OBCLIENT_LB_READ_TIMEOUT};
 static ObClientLBKeyType tns_keytype_18[] = { OBCLIENT_LB_EXTRA_INFO, OBCLIENT_LB_OBLB_RETRY_TIMEOUT, OBCLIENT_LB_WRITE_TIMEOUT};
-static ObClientLBKeyType tns_keytype_19[] = { OBCLIENT_LB_OBLB_GROUP_STRATEGY};
+static ObClientLBKeyType tns_keytype_19[] = { OBCLIENT_LB_OBLB_GROUP_STRATEGY, OBCLIENT_LB_SESSION_VARIABLE};
 static ObClientLBKeyType tns_keytype_20[] = { OBCLIENT_LB_OBLB_RETRY_ALL_DOWNS, OBCLIENT_LB_CONNECT_TIMEOUT};
 
 static const void *tns_key_array[] = {
@@ -1306,6 +1306,8 @@ int ObClientConnectDataBuild(ObClientDescription *des, ObClientTnsParseParams *p
           TNS_PARSE_INTRGER_VALUE(parse_params, connect_data->use_default_sid);
         } else if (OBCLIENT_LB_SESSION_VARIABLE == parse_params->key_type) {
           TNS_PARSE_STRING_VALUE(parse_params, connect_data->session_variable, connect_data->session_variable_len, OBCLIENT_TNS_KEY_SIZE);
+        } else if (OBCLIENT_LB_OB_ENABLE_SSL == parse_params->key_type) {
+          TNS_PARSE_INTRGER_VALUE(parse_params, connect_data->ob_enable_ssl);
         } else {
           ret = -1;
         }

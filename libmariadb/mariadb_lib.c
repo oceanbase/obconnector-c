@@ -177,6 +177,20 @@ my_bool get_local_ip_port(my_socket fd, char *ip, int iplen, int *port)
   }
 }
 
+static my_bool is_force_use_ssl()
+{
+  static my_bool obclient_force_ssl = 0;
+  static my_bool is_inited = 0;
+  if (!is_inited) {
+    char *tmp = getenv("OBCLIENT_FORCE_SSL");
+    is_inited = 1;
+    if (tmp && 1 == atoi(tmp)) {
+      obclient_force_ssl = 1;
+    }
+  }
+  return obclient_force_ssl;
+}
+
 // static void end_server(MYSQL *mysql);
 static void mysql_close_memory(MYSQL *mysql);
 void read_user_name(char *name);
@@ -2197,12 +2211,13 @@ ma_set_ob_connect_attrs(MYSQL *mysql)
   rc += mysql_optionsv(mysql, MYSQL_OPT_CONNECT_ATTR_ADD, OB_MYSQL_CLIENT_NAME_KEY, OB_MYSQL_CLIENT_NAME_VALUE);
   rc += mysql_optionsv(mysql, MYSQL_OPT_CONNECT_ATTR_ADD, OB_MYSQL_CLIENT_VERSION_KEY, LIBOBCLIENT_VERSION);
 
+  caplob |= OBCLIENT_CAP_SUPPORT_JDBC_BINARY_DOUBLE;
   if (mysql->can_use_ob_client_lob_locatorv2) {
     caplob |= OBCLIENT_CAP_OB_LOB_LOCATOR_V2;
-    caplob |= OBCLIENT_CAP_SUPPORT_JDBC_BINARY_DOUBLE;
-    snprintf(caplob_buf, OB_MAX_UINT64_BUF_LEN, "%llu", caplob);
-    rc += mysql_optionsv(mysql, MYSQL_OPT_CONNECT_ATTR_ADD, OB_MYSQL_CLIENT_ATTRIBUTE_CAPABILITY_FLAG, caplob_buf);
   }
+  snprintf(caplob_buf, OB_MAX_UINT64_BUF_LEN, "%llu", caplob);
+  rc += mysql_optionsv(mysql, MYSQL_OPT_CONNECT_ATTR_ADD, OB_MYSQL_CLIENT_ATTRIBUTE_CAPABILITY_FLAG, caplob_buf);
+
   if (mysql->proxy_user && mysql->proxy_user[0]) {
     rc += mysql_optionsv(mysql, MYSQL_OPT_CONNECT_ATTR_ADD, OB_MYSQL_PROXY_USER_NAME, mysql->proxy_user);
   }
@@ -2292,6 +2307,10 @@ mysql_real_connect(MYSQL *mysql, const char *host, const char *user,
   char *end= NULL;
   char *connection_handler= (mysql->options.extension) ?
                             mysql->options.extension->connection_handler : 0;
+
+  if (!mysql->options.use_ssl && is_force_use_ssl()) {
+    mysql_ssl_set(mysql, NULL, NULL, NULL, NULL, NULL);
+  }
 
   if (!mysql->methods)
     mysql->methods= &MARIADB_DEFAULT_METHODS;

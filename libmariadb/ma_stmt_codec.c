@@ -1539,6 +1539,7 @@ static ulong get_complex_header_length(enum_types type) {
   case TYPE_VARCHAR2:
   case TYPE_CHAR:
   case TYPE_RAW:
+  case TYPE_OB_NCHAR:
     return sizeof(MYSQL_COMPLEX_BIND_STRING);
   case TYPE_NUMBER:
     return sizeof(MYSQL_COMPLEX_BIND_DECIMAL);
@@ -1972,6 +1973,55 @@ static void fetch_result_array_complex(MYSQL_COMPLEX_BIND_ARRAY *header,
   header->length = num;
   return;
 }
+
+static void fetch_result_xmltype_complex(MYSQL_COMPLEX_BIND_OBJECT *header,
+  MYSQL_BIND *param,
+  uchar **row)
+{
+  void *buffer = NULL;
+  ulong length = 0;
+  uint i = 0;
+  COMPLEX_TYPE_XMLTYPE *xmltype = NULL;
+  struct st_complex_type *complex_type = NULL;
+  uchar *null_ptr, bit;
+  ulong xmllength = 0;
+
+  complex_type = get_complex_type(param->mysql, header->owner_name, header->type_name);
+
+  if (complex_type == NULL) {
+    *param->error = 1;
+    return;
+  }
+
+  xmltype = (COMPLEX_TYPE_XMLTYPE *)complex_type;
+
+  length += get_complex_header_length(xmltype->child.type);
+
+
+  buffer = fetch_result_complex_alloc_space((MYSQL_COMPLEX_BIND_BASIC *)header, param, length);
+  if (NULL == buffer) {
+    return;
+  }
+
+  //null_ptr = *row;
+  //*row += (1 + 9) / 8;    /* skip null bits */
+  //bit = 4;          /* first 2 bits are reserved */
+
+  fill_complex_type(param, buffer, &(xmltype->child));
+
+  //if (*row) {
+  //  ((MYSQL_COMPLEX_BIND_BASIC *)buffer)->is_null = 1;
+  //} else {
+  //  fetch_result_complex(param, buffer, &(xmltype->child), row);
+  //}
+  fetch_result_complex(param, buffer, &(xmltype->child), row);
+
+  buffer = (char*)buffer + get_complex_header_length(xmltype->child.type);
+
+  header->length = (char*)buffer - (char*)header->buffer;
+  return;
+}
+
 static void fetch_result_complex(MYSQL_BIND *param, void *buffer,
                                  CHILD_TYPE *child, uchar **row)
 {
@@ -1985,6 +2035,7 @@ static void fetch_result_complex(MYSQL_BIND *param, void *buffer,
   case TYPE_NVARCHAR2:
   case TYPE_VARCHAR2:
   case TYPE_CHAR:
+  case TYPE_OB_NCHAR:
     {
     fetch_result_str_complex((MYSQL_COMPLEX_BIND_STRING *)buffer, param, row);
     break;
@@ -2133,6 +2184,11 @@ static uint mysql_type_to_object_type(uint mysql_type)
       object_type = TYPE_NVARCHAR2;
       break;
     }
+  case MYSQL_TYPE_OB_NCHAR:
+    {
+      object_type = TYPE_OB_NCHAR;
+      break;
+    }
   case MYSQL_TYPE_OB_RAW:
     {
       object_type = TYPE_RAW;
@@ -2211,6 +2267,12 @@ static void fill_complex_type(MYSQL_BIND *param, void *buffer,
     {
     MYSQL_COMPLEX_BIND_STRING *header = (MYSQL_COMPLEX_BIND_STRING *)buffer;
     header->buffer_type = MYSQL_TYPE_OB_NVARCHAR2;
+    break;
+    }
+  case TYPE_OB_NCHAR:
+    {
+    MYSQL_COMPLEX_BIND_STRING *header = (MYSQL_COMPLEX_BIND_STRING *)buffer;
+    header->buffer_type = MYSQL_TYPE_OB_NCHAR;
     break;
     }
   case TYPE_RAW:
@@ -2358,6 +2420,19 @@ static void fetch_result_type_complex(MYSQL_COMPLEX_BIND_OBJECT *header,
     buffer->buffer_type = MYSQL_TYPE_ARRAY;
 
     fetch_result_array_complex(buffer, param, row, complex_type);
+  } else if (TYPE_XMLTYPE == complex_type->type) {
+    MYSQL_COMPLEX_BIND_OBJECT *buffer = fetch_result_complex_alloc_space((MYSQL_COMPLEX_BIND_BASIC *)header,
+      param, sizeof(MYSQL_COMPLEX_BIND_OBJECT));
+
+    if (NULL == buffer) {
+      return;
+    }
+
+    buffer->owner_name = header->owner_name;
+    buffer->type_name = header->type_name;
+    buffer->buffer_type = MYSQL_TYPE_OBJECT;
+
+    fetch_result_xmltype_complex(buffer, param, row);
   }
 
   return;
