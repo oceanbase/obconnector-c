@@ -51,21 +51,27 @@ if [[ "$OS_KERNEL" == "Darwin" ]]; then
     #
     PKGS="$(grep '\.tar\.gz' "${DEP_FILE}" | grep -v '^#')"
 
-    for pkg_url in $PKGS
+    for pkg_entry in $PKGS
     do
-      pkg="${pkg_url##*/}"
+      if [[ $pkg_entry == http:* || $pkg_entry == https:* ]]; then
+        URL="$pkg_entry"
+        pkg="${pkg_entry##*/}"
+      else
+        URL="${REPO%/}/${pkg_entry}"
+        pkg="$pkg_entry"
+      fi
       if [[ -f "${PWD}/pkg/${pkg}" ]]; then
         echo "find package <${pkg}> in cache"
       else
         echo -e "download package <${pkg}>... \c"
         TEMP=$(mktemp "${PWD}/pkg/.${pkg}.XXXX")
-        curl -sL "${pkg_url}" -o "${TEMP}"
+        curl -fsL "${URL}" -o "${TEMP}"
         if [[ $? -eq 0 ]]; then
           mv -f "${TEMP}" "${PWD}/pkg/${pkg}"
           echo "SUCCESS"
         else
           rm -rf "${TEMP}"
-          echo "FAILED" 1>&2
+          echo "FAILED (url: ${URL})" 1>&2
           exit 4
         fi
       fi
