@@ -80,6 +80,7 @@ typedef enum enum_obclient_lb_key_type
   OBCLIENT_LB_OB_MODE,
   OBCLIENT_LB_USE_DEFAULT_SID,
   OBCLIENT_LB_SESSION_VARIABLE,
+  OBCLIENT_LB_OB_ENABLE_SSL,
   OBCLIENT_LB_MAX_KEY_TYPE
 } ObClientLBKeyType;
 
@@ -183,6 +184,7 @@ struct obclient_connect_data
   unsigned int  session_variable_len;
   unsigned long  ob_mode;
   unsigned long  use_default_sid;
+  unsigned long ob_enable_ssl;
 };
 
 struct obclient_tns_parse_params

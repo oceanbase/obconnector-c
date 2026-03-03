@@ -27,6 +27,10 @@
 #include "ma_hash.h"
 #include "ob_rwlock.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef struct st_complex_hash {
   unsigned char *hash_key;
   OB_HASH *hash;
@@ -54,6 +58,8 @@ typedef enum enum_types {
   TYPE_OB_TIMESTAMP_WITH_LOCAL_TIME_ZONE,
   TYPE_OB_INTERVAL_YM,
   TYPE_OB_INTERVAL_DS,
+  TYPE_XMLTYPE,
+  TYPE_OB_NCHAR,
   TYPE_UNKNOW,
   TYPE_MAX
 } enum_types;
@@ -69,6 +75,11 @@ typedef struct st_complex_type {
 typedef struct st_child_type {
   enum_types type;
   COMPLEX_TYPE *object;
+  //int attr_length;
+  //int attr_precision;
+  //int attr_scale;
+  //int attr_upper_bound;
+  //unsigned char attr_name[128];
 } CHILD_TYPE;
 
 typedef struct st_complex_type_object {
@@ -83,7 +94,15 @@ typedef struct st_complex_type_collection {
   CHILD_TYPE child;
 } COMPLEX_TYPE_COLLECTION;
 
+//xmltype child is string
+typedef COMPLEX_TYPE_COLLECTION COMPLEX_TYPE_XMLTYPE;
+
 COMPLEX_TYPE* STDCALL get_complex_type(MYSQL *mysql, unsigned char *owner_name, unsigned char *type_name);
 COMPLEX_TYPE* STDCALL get_complex_type_with_local(MYSQL *mysql, unsigned char *type_name);
+
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* _OB_COMPLEX_H */

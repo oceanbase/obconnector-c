@@ -1123,6 +1123,13 @@ typedef unsigned long long intptr;
 #else
   #define OB_LIKELY(x)       __builtin_expect(!!(x),1)
   #define OB_UNLIKELY(x)     __builtin_expect(!!(x),0)
+  /* macOS (and other non-glibc platforms) may not define __UINT64_C / __INT64_C */
+  #ifndef __UINT64_C
+    #define __UINT64_C(c)   c ## ULL
+  #endif
+  #ifndef __INT64_C
+    #define __INT64_C(c)    c ## LL
+  #endif
 #endif
 
 #define OB_ISNULL(statement) (OB_UNLIKELY(NULL == (statement)))

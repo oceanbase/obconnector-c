@@ -21,36 +21,36 @@
 *************************************************************************/
 
 #include "ob_cond.h"
+#include "ob_utils.h"
+
+#ifndef _WIN32
+#include <sys/time.h>
+#endif
 
 #ifdef _WIN32
 #include <time.h>
 #include <limits.h>
-union ft64 {
-  FILETIME ft;
-  __int64 i64;
-};
 
-DWORD ob_get_milliseconds(const struct timespec *ob_timespec)
+DWORD ob_get_wait_milliseconds(const struct timespec *ob_timespec)
 {
   DWORD ret;
-  union ft64 ob_now_time;
-  long long ob_millis_time;
-  unsigned __int64   obtime;
-  static const unsigned __int64 EPOCH = ((unsigned __int64)116444736000000000ULL);
+  struct timeval tv;
+  long long wait_ms;
 
   if (NULL == ob_timespec) {
     ret = INFINITE;
   } else {
-    obtime = ob_timespec->tv_sec * 10000000L + EPOCH;
-    GetSystemTimeAsFileTime(&ob_now_time.ft);
-    ob_millis_time = (obtime - ob_now_time.i64) / 10000;
-    if (ob_millis_time < 0) {
+    ob_gettimeofday(&tv, NULL);
+    wait_ms = ((unsigned __int64)ob_timespec->tv_sec * 1000000L + ob_timespec->tv_nsec / 1000) -
+      ((unsigned __int64)tv.tv_sec * 1000000L + tv.tv_usec);
+    if (wait_ms < 0) {
       ret = 0;
     } else {
-      if (ob_millis_time > UINT_MAX) {
-        ob_millis_time= UINT_MAX;
+      wait_ms = wait_ms / 1000;
+      if (wait_ms > UINT_MAX) {
+        wait_ms = UINT_MAX;
       }
-      ret = ob_millis_time;
+      ret = wait_ms;
     }
   }
 
@@ -72,8 +72,8 @@ int ob_cond_destroy(ob_cond_t *ob_cond)
 int ob_cond_timedwait(ob_cond_t *ob_cond, ob_mutex_t *ob_mutex, const struct timespec *ob_timespec)
 {
   int ret;
-  DWORD timeout= ob_get_milliseconds(ob_timespec);
-  if (!SleepConditionVariableCS(ob_cond, ob_mutex, timeout)) {
+  DWORD timeout = ob_get_wait_milliseconds(ob_timespec);
+  if (timeout > 0 && !SleepConditionVariableCS(ob_cond, ob_mutex, timeout)) {
     ret = ETIMEDOUT;
   } else {
     ret = 0;
@@ -102,6 +102,18 @@ int ob_cond_broadcast(ob_cond_t *ob_cond)
 {
   WakeAllConditionVariable(ob_cond);
   return 0;
+}
+
+int ob_cond_timedwait_us(ob_cond_t *cond, ob_mutex_t *mutex, unsigned long long wait_us)
+{
+  int ret;
+  DWORD timeout = wait_us/1000;
+  if (timeout > 0 && !SleepConditionVariableCS(cond, mutex, timeout)) {
+    ret = ETIMEDOUT;
+  } else {
+    ret = 0;
+  }
+  return ret;
 }
 
 #else
@@ -134,6 +146,18 @@ int ob_cond_signal(ob_cond_t *ob_cond)
 int ob_cond_broadcast(ob_cond_t *ob_cond)
 {
   return pthread_cond_broadcast(ob_cond);
+}
+
+int ob_cond_timedwait_us(ob_cond_t *cond, ob_mutex_t *mutex, unsigned long long wait_us)
+{
+  struct timespec ts;
+  struct timeval tv;
+  unsigned long long abs_time = 0;
+  gettimeofday(&tv, NULL);
+  abs_time = wait_us + (tv.tv_sec * 1000000 + tv.tv_usec);
+  ts.tv_sec = abs_time / 1000000;
+  ts.tv_nsec = (abs_time % 1000000) * 1000;
+  return pthread_cond_timedwait(cond, mutex, &tv);
 }
 
 #endif

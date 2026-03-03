@@ -52,6 +52,7 @@
 #include <netinet/ip.h>
 #include <netdb.h>
 #include <netinet/tcp.h>
+#include <arpa/inet.h>
 #define IS_SOCKET_EINTR(err) ((err) == SOCKET_EINTR)
 #else
 #include <ws2tcpip.h>

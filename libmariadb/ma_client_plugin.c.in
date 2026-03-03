@@ -367,6 +367,7 @@ mysql_load_plugin_v(MYSQL *mysql, const char *name, int type,
   void *sym, *dlhandle = NULL;
   struct st_mysql_client_plugin *plugin;
   char *env_plugin_dir= getenv("MARIADB_PLUGIN_DIR");
+  char *obclient_plugin_dir = getenv("OBCLIENT_PLUGIN_DIR");
 
   CLEAR_CLIENT_ERROR(mysql);
   if (is_not_initialized(mysql, name))
@@ -385,12 +386,14 @@ mysql_load_plugin_v(MYSQL *mysql, const char *name, int type,
 #ifndef WIN32
   snprintf(dlpath, sizeof(dlpath) - 1, "%s/%s%s",
            mysql->options.extension && mysql->options.extension->plugin_dir ?
-           mysql->options.extension->plugin_dir : (env_plugin_dir) ? env_plugin_dir :
-           MARIADB_PLUGINDIR, name, SO_EXT);
+           mysql->options.extension->plugin_dir : (obclient_plugin_dir) ?
+           obclient_plugin_dir : (env_plugin_dir) ?
+           env_plugin_dir : MARIADB_PLUGINDIR, name, SO_EXT);
 #else
   {
     char *p= (mysql->options.extension && mysql->options.extension->plugin_dir) ?
-             mysql->options.extension->plugin_dir : env_plugin_dir;
+             mysql->options.extension->plugin_dir : (obclient_plugin_dir) ? 
+             obclient_plugin_dir : env_plugin_dir;
     snprintf(dlpath, sizeof(dlpath), "%s%s%s%s", p ? p : "", p ? "\\" : "", name, SO_EXT);
   }
 #endif

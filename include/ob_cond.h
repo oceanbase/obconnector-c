@@ -42,6 +42,7 @@ int ob_cond_timedwait(ob_cond_t *cond, ob_mutex_t *mutex, const struct timespec 
 int ob_cond_wait(ob_cond_t *cond, ob_mutex_t *mutex);
 int ob_cond_signal(ob_cond_t *cond);
 int ob_cond_broadcast(ob_cond_t *cond);
+int ob_cond_timedwait_us(ob_cond_t *cond, ob_mutex_t *mutex, unsigned long long wait_us);
 
 #ifdef __cplusplus
 }

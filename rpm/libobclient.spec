@@ -15,7 +15,7 @@ LibObClient is a driver used to connect applications developed in C to OceanBase
 %define MYSQL_GROUP root
 %define __os_install_post %{nil}
 #%define base_dir /u01/mysql
-%define file_dir /app/mariadb
+%define file_dir /u01/obclient
 
 
 %prep
@@ -35,8 +35,8 @@ for dir in `ls $RPM_BUILD_ROOT%{file_dir} | grep -v "bin\|share\|include\|lib"`
 do
         rm -rf $RPM_BUILD_ROOT%{file_dir}/${dir}
 done
-mkdir -p $RPM_BUILD_ROOT%{prefix}
-mv $RPM_BUILD_ROOT%{file_dir}/* $RPM_BUILD_ROOT%{prefix}
+#mkdir -p $RPM_BUILD_ROOT%{prefix}
+#mv $RPM_BUILD_ROOT%{file_dir}/* $RPM_BUILD_ROOT%{prefix}
 #mv $RPM_BUILD_ROOT%{prefix}/include/mariadb $RPM_BUILD_ROOT%{prefix}/include/mariadb_bak
 #mv $RPM_BUILD_ROOT%{prefix}/include/mariadb_bak/* $RPM_BUILD_ROOT%{prefix}/include/
 #rm -rf $RPM_BUILD_ROOT%{prefix}/include/mariadb_bak

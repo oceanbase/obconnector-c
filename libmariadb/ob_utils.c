@@ -1,4 +1,7 @@
 #include "ob_utils.h"
+#ifndef _WIN32
+#include <sys/time.h>
+#endif
 
 #ifdef _WIN32
 int gettimeofday(struct timeval *tp, void *tzp)

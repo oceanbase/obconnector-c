@@ -693,11 +693,12 @@ do_stmt_read_row_from_oracle_implicit_cursor(MYSQL_STMT *stmt, unsigned char **r
         return (1);
       }
       /** Not need to reinit fields for stmt, for it cannot update the MYSQL_RES's fileds which has returned before.
-       *  If need get last the fields info for fetch, it need open it and get newest MYSQL_RES.
-      else if (reinit_stmt_field(stmt))
+       *  If need get last the fields info for fetch, it need open it and get newest MYSQL_RES.*/
+      else if (madb_reinit_result_set_metadata(stmt))  //for MYSQL_TYPE_OBJECT fetch
       {
+        free(buf);
         DBUG_RETURN(1);
-      } */
+      } 
       else {
         //the status will change in mthd_my_read_query_result, reset it here
         stmt->mysql->status = back_status;
@@ -1281,17 +1282,17 @@ static void store_param_oracle_interval_complex(unsigned char **pos, MYSQL_COMPL
   uchar buff[20] = {0};
   int len = 0;
 
-  if (param->buffer_type == MYSQL_TYPE_OB_INTERVAL_YM) {
+  if (interval->mysql_type == MYSQL_TYPE_OB_INTERVAL_YM) {
     len = 8;
     buff[0] = 7;
-    buff[1] = interval->data_symbol > 0 ? 0 : 1; //正 0， 负 1
+    buff[1] = interval->data_symbol >= 0 ? 0 : 1; //正 0， 负 1
     int4store(buff + 2, interval->data_object.ym_object.ym_year);
     buff[6] = (uchar)(interval->data_object.ym_object.ym_month);
     buff[7] = (uchar)(interval->data_object.ym_object.ym_scale);
-  } else if (param->buffer_type == MYSQL_TYPE_OB_INTERVAL_DS) {
+  } else if (interval->mysql_type == MYSQL_TYPE_OB_INTERVAL_DS) {
     len = 15;
     buff[0] = 14;
-    buff[1] = interval->data_symbol > 0 ? 0 : 1;  //正 0， 负 1
+    buff[1] = interval->data_symbol >= 0 ? 0 : 1;  //正 0， 负 1
     int4store(buff + 2, interval->data_object.ds_object.ds_day);
     buff[6] = (uchar)(interval->data_object.ds_object.ds_hour);
     buff[7] = (uchar)(interval->data_object.ds_object.ds_minute);
@@ -1622,6 +1623,7 @@ STORE_PARAM(int32)
 // STORE_PARAM(datetime)  // unused
 STORE_PARAM(oracle_timestamp_nano)
 STORE_PARAM(oracle_timestamp_tz)
+STORE_PARAM(oracle_interval)
 
 int store_param(MYSQL_STMT *stmt, int column, unsigned char **p, unsigned long row_nr)
 {
@@ -1796,6 +1798,10 @@ int store_param(MYSQL_STMT *stmt, int column, unsigned char **p, unsigned long r
     case MYSQL_TYPE_OBJECT:
       store_param_object(stmt, column, p, row_nr);
       break;
+    case MYSQL_TYPE_OB_INTERVAL_DS:
+    case MYSQL_TYPE_OB_INTERVAL_YM:
+      store_param_oracle_interval(stmt, column, p, row_nr);
+      break;
     //end add for oboracle type support
   default:
     /* unsupported parameter type */
@@ -1964,6 +1970,10 @@ static ulong calculate_param_array_len(MYSQL_COMPLEX_BIND_ARRAY *param)
 static ulong calculate_param_complex_len(MYSQL_COMPLEX_BIND_HEADER *header)
 {
   ulong len = 0;
+  if (header->is_null) {
+    return 0;
+  }
+
   switch (header->buffer_type) {
     case MYSQL_TYPE_TINY:
       len = 1;
@@ -2715,6 +2725,9 @@ my_bool STDCALL mysql_stmt_bind_param(MYSQL_STMT *stmt, MYSQL_BIND *bind)
       case MYSQL_TYPE_OB_TIMESTAMP_NANO:
       case MYSQL_TYPE_OB_TIMESTAMP_WITH_LOCAL_TIME_ZONE:
         stmt->params[i].buffer_length= 13;
+        break;
+      case MYSQL_TYPE_OB_INTERVAL_DS:
+      case MYSQL_TYPE_OB_INTERVAL_YM:
         break;
       case MYSQL_TYPE_ORA_BLOB:
       case MYSQL_TYPE_ORA_CLOB:
@@ -5778,15 +5791,19 @@ static int madb_update_stmt_fields(MYSQL_STMT *stmt) // same as update_stmt_fiel
 */
 
     /* 判断 owner_name 是否为空, 避免每次都申请内存, 如果一直 execute, 不重新 prepare, 内存就释放不了 */
-    if (MYSQL_TYPE_OBJECT == field->type && NULL == stmt_field->owner_name && NULL != field->owner_name) {
-      stmt_field->owner_name= (unsigned char *)ma_memdup_root(fields_ma_alloc_root,
-                                                              (char*)field->owner_name,
-                                                              field->owner_name_length+1);
-      stmt_field->owner_name[field->owner_name_length] = 0;
-      stmt_field->type_name= (unsigned char *)ma_memdup_root(fields_ma_alloc_root,
-                                                              (char*)field->type_name,
-                                                              field->type_name_length+1);
-      stmt_field->type_name[field->type_name_length] = 0;
+    if (MYSQL_TYPE_OBJECT == field->type) {
+      if (NULL == stmt_field->owner_name && NULL != field->owner_name) {
+        stmt_field->owner_name = (unsigned char *)ma_memdup_root(fields_ma_alloc_root,
+          (char*)field->owner_name,
+          field->owner_name_length + 1);
+        stmt_field->owner_name[field->owner_name_length] = 0;
+      }
+      if (NULL == stmt_field->type_name && NULL != field->type_name) {
+        stmt_field->type_name = (unsigned char *)ma_memdup_root(fields_ma_alloc_root,
+          (char*)field->type_name,
+          field->type_name_length + 1);
+        stmt_field->type_name[field->type_name_length] = 0;
+      }
     }
   }
   return 0;
@@ -5956,6 +5973,122 @@ static int stmt_read_prepare_execute_response(MYSQL_STMT* stmt)
   }
   DBUG_RETURN(0);
 }
+
+static const char *skipcomment(const char *sql)
+{
+  enum STATUS_TYPE
+  {
+    BLACK,
+    FIRSTTYPECOMMENT_BEGIN,
+    FIRSTTYPECOMMENT_IN,
+    SECONDETYPECOMMENT_BEGIN,
+    SECONDETYPECOMMENT_IN,
+    SECONDETYPECOMMENT_END,
+    STATEMENT,
+    SQLERROR
+  };
+  int status = BLACK;
+  const char *tmp_sql = sql;
+
+  if (NULL == sql) {
+    return NULL;
+  }
+
+  while ('\0' != *sql) {
+    char ch = *sql;
+    switch (status)
+    {
+    case BLACK:
+    {
+      if ('\t' == ch || '\n' == ch || '\r' == ch || ' ' == ch) {
+        /* 这几个情况状态不变 */
+      } else if ('-' == ch) {
+        status = FIRSTTYPECOMMENT_BEGIN;
+      } else if ('/' == ch) {
+        status = SECONDETYPECOMMENT_BEGIN;
+      } else {
+        status = STATEMENT;
+      }
+      break;
+    }
+    case FIRSTTYPECOMMENT_BEGIN:
+    {
+      if ('-' == ch) {
+        status = FIRSTTYPECOMMENT_IN;
+      } else {
+        status = STATEMENT;
+      }
+      break;
+    }
+    case FIRSTTYPECOMMENT_IN:
+    {
+      if ('\n' == ch) {
+        status = BLACK;
+      }
+      /* 其他情况一直在注释中 */
+      break;
+    }
+    case SECONDETYPECOMMENT_BEGIN:
+    {
+      if ('*' == ch) {
+        status = SECONDETYPECOMMENT_IN;
+      } else {
+        status = SQLERROR;
+      }
+      break;
+    }
+    case SECONDETYPECOMMENT_IN:
+    {
+      if ('*' == ch) {
+        status = SECONDETYPECOMMENT_END;
+      }
+      /* 其他情况一直在注释中 */
+      break;
+    }
+    case SECONDETYPECOMMENT_END:
+    {
+      if ('/' == ch) {
+        status = BLACK; /* 跳出注释 */
+      } else {
+        status = SECONDETYPECOMMENT_IN; /* 还在注释中，回到状态2 */
+      }
+      break;
+    }
+    case STATEMENT:
+      return sql;
+    case SQLERROR:
+      return tmp_sql;
+    default:
+      break;
+    }
+    if (status == STATEMENT)
+      return sql;
+    sql++;
+  }
+  return sql;
+}
+static int get_stmt_type(const char* query, unsigned long length) {
+#define STMT_TYPE_INSERT 1
+#define STMT_TYPE_UPDATE 2
+#define STMT_TYPE_DELETE 3
+  int type = -1;
+  const char *p = query;
+
+  //trim space/comment
+  p = skipcomment(p);
+  if (p) {
+    while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') p++;
+
+    if (strncasecmp(p, "insert", 6) == 0) {
+      type = 1;
+    } else if (strncasecmp(p, "update", 6) == 0) {
+      type = 2;
+    } else if (strncasecmp(p, "delete", 6) == 0) {
+      type = 3;
+    }
+  }
+  return type;
+}
 int STDCALL mysql_stmt_execute_v2(MYSQL_STMT *stmt,
                                   const char *query,
                                   unsigned long length,
@@ -6001,7 +6134,21 @@ int STDCALL mysql_stmt_execute_v2(MYSQL_STMT *stmt,
   }
   if (execute_mode & 0x00000010 || arg)//describe only
   {
-    DBUG_RETURN(mysql_stmt_execute_describe_only(stmt, query, length));
+    //DBUG_RETURN(mysql_stmt_execute_describe_only(stmt, query, length));
+    ret = mysql_stmt_execute_describe_only(stmt, query, length);
+    if (ret == 0 && get_stmt_type(query, length) > 0 && stmt->field_count > 0) {
+      //return ... into ...
+      stmt->param_count = stmt->param_count + stmt->field_count;
+      if (stmt->param_count > 0) {
+        if (!(stmt->params = (MYSQL_BIND *)ma_alloc_root(&stmt->mem_root, stmt->param_count * sizeof(MYSQL_BIND))))
+        {
+          SET_CLIENT_STMT_ERROR(stmt, CR_OUT_OF_MEMORY, SQLSTATE_UNKNOWN, 0);
+          return(1);
+        }
+        memset(stmt->params, '\0', stmt->param_count * sizeof(MYSQL_BIND));
+      }
+    }
+    DBUG_RETURN(ret);
   }
   if (stmt->param_count && !stmt->bind_param_done)
   {
