@@ -5,13 +5,13 @@ INCLUDE_DIRECTORIES(${CC_SOURCE_DIR}/include)
 
 SET(CRYPTO_PLUGIN 1)
 IF(WIN32)
-  SET(CRYPT_SOURCE ${CC_SOURCE_DIR}/libmariadb/secure/win_crypt.c)
+  SET(CRYPT_SOURCE ${CC_SOURCE_DIR}/libmariadb/secure/win_crypt.c ${CC_SOURCE_DIR}/libmariadb/secure/sm3.c)
   SET(CRYPT_LIBS crypt32 bcrypt)
 ELSEIF(WITH_SSL STREQUAL "OPENSSL")
   SET(CRYPT_SOURCE ${CC_SOURCE_DIR}/libmariadb/secure/openssl_crypt.c)
   SET(CRYPT_LIBS ${SSL_LIBRARIES})
 ELSEIF(WITH_SSL STREQUAL "GNUTLS")
-  SET(CRYPT_SOURCE ${CC_SOURCE_DIR}/libmariadb/secure/gnutls_crypt.c)
+  SET(CRYPT_SOURCE ${CC_SOURCE_DIR}/libmariadb/secure/gnutls_crypt.c ${CC_SOURCE_DIR}/libmariadb/secure/sm3.c)
   IF (NOT SSL_LIBRARIES MATCHES "^.*\\.a$")
     SET(CRYPT_LIBS ${SSL_LIBRARIES})
   ENDIF()
@@ -72,6 +72,15 @@ IF(CRYPTO_PLUGIN)
                 CONFIGURATIONS DYNAMIC STATIC OFF
                 DEFAULT DYNAMIC
                 SOURCES ${CC_SOURCE_DIR}/plugins/auth/caching_sha2_pw.c 
+                        ${CRYPT_SOURCE}
+                LIBRARIES ${CRYPT_LIBS} ${SYSTEM_LIBS})
+                
+  # SM3 caching plugin for Oceanbase connection
+  REGISTER_PLUGIN(TARGET ob_sm3_password
+                TYPE MARIADB_CLIENT_PLUGIN_AUTH
+                CONFIGURATIONS DYNAMIC STATIC OFF
+                DEFAULT DYNAMIC
+                SOURCES ${CC_SOURCE_DIR}/plugins/auth/ob_sm3_pw.c 
                         ${CRYPT_SOURCE}
                 LIBRARIES ${CRYPT_LIBS} ${SYSTEM_LIBS})
 

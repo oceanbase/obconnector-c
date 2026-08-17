@@ -55,6 +55,10 @@ typedef struct _st_obclient_lb_config{
   char *mysql_opt_ssl_crl;
   char *mysql_opt_ssl_crlpath;
   char *mysql_opt_tls_version;
+  my_bool mysql_opt_close_attr_obclient_ip;
+  my_bool mysql_opt_close_attr_obclient_name;
+  char *reserved_1;
+  char reserved_2[64];
 }ObClientLbConfig;
 
 

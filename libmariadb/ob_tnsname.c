@@ -918,6 +918,8 @@ int ObClientAppendStrategyBuild(ObClientBlacklistConf *black, ObClientTnsParsePa
           TNS_PARSE(parse_params, TNS_KEY);
           if (0 == strncasecmp(parse_params->tns_key, "RETRYDURATION", parse_params->tns_key_len)) {
             black->append_strategy = OBCLIENT_LB_OPTION_RETRY_DERUATION;
+          } else if (0 == strncasecmp(parse_params->tns_key, "NORMAL", parse_params->tns_key_len)) {
+            black->append_strategy = OBCLIENT_LB_OPTION_NORMAL;
           } else {
             ret = -1;
           }
@@ -1201,7 +1203,11 @@ int ObClientAddressBuild(ObClientAddressList *address_list, ObClientTnsParsePara
       if (OB_SUCC(ret)) {
         if (OBCLIENT_LB_PROTOCOL == parse_params->key_type) {
           TNS_PARSE_STRING_VALUE(parse_params, address->protocol, address->protocol_len, OBCLIENT_TNS_PORT_BUFFER_SIZE);
-          if (address->protocol_len != 3 || 0 != strncasecmp(address->protocol, "TCP", address->protocol_len)) {
+          if (address->protocol_len == 3 && 0 == strncasecmp(address->protocol, "TCP", address->protocol_len)) {
+            ;
+          } else if (address->protocol_len == 4 && 0 == strncasecmp(address->protocol, "TCPS", address->protocol_len)) {
+            ;
+          } else {
             ret = -1;
           }
         } else if (OBCLIENT_LB_HOST == parse_params->key_type) {

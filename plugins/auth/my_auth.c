@@ -677,6 +677,9 @@ retry:
   */
   if (mysql->net.read_pos[0] == 0)
     return ma_read_ok_packet(mysql, mysql->net.read_pos + 1, pkt_length);
+
+  //return error message
+  my_set_error(mysql, CR_MALFORMED_PACKET, SQLSTATE_UNKNOWN, 0);
   return 1;
 }
 

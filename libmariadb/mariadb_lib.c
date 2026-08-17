@@ -769,6 +769,8 @@ struct st_default_options mariadb_defaults[] =
   {MYSQL_OPT_BIND, MARIADB_OPTION_STR, "bind-address"},
   {MYSQL_OPT_SSL_ENFORCE, MARIADB_OPTION_BOOL, "ssl-enforce"},
   {OB_OPT_PROXY_USER, MARIADB_OPTION_STR, "proxy-user"},
+  {OB_OPT_CLOSE_ATTR_OBCLIENT_IP, MARIADB_OPTION_BOOL, "close-ip"},
+  {OB_OPT_CLOSE_ATTR_OBCLIENT_NAME, MARIADB_OPTION_BOOL, "close-name"},
   {0, 0, NULL}
 };
 
@@ -1115,7 +1117,7 @@ unpack_fields(const MYSQL *mysql,
       为了兼容PS协议/二合一协议object处理,最后row->data[i]里面包含length，所以这里要先解析length 
       */
       if (default_value && row->data[i] && row->data_length[i] > 0) {
-        len = (ulong)net_field_length(&(row->data[i]));
+        len = (ulong)net_field_length((uchar **)(&(row->data[i])));
         if (default_value && len > 0 && len != NULL_LENGTH) {
           field->def = ma_strdup_root(alloc, (char*)row->data[i]);
         } else {
@@ -2208,7 +2210,9 @@ ma_set_ob_connect_attrs(MYSQL *mysql)
 
   rc += mysql_optionsv(mysql, MYSQL_OPT_CONNECT_ATTR_ADD, OB_MYSQL_CAPABILITY_FLAG, cap_buf);
   rc += mysql_optionsv(mysql, MYSQL_OPT_CONNECT_ATTR_ADD, OB_MYSQL_CLIENT_MODE, "__ob_libobclient");
-  rc += mysql_optionsv(mysql, MYSQL_OPT_CONNECT_ATTR_ADD, OB_MYSQL_CLIENT_NAME_KEY, OB_MYSQL_CLIENT_NAME_VALUE);
+  if (!mysql->options.close_attr_obclient_name) {
+    rc += mysql_optionsv(mysql, MYSQL_OPT_CONNECT_ATTR_ADD, OB_MYSQL_CLIENT_NAME_KEY, OB_MYSQL_CLIENT_NAME_VALUE);
+  }
   rc += mysql_optionsv(mysql, MYSQL_OPT_CONNECT_ATTR_ADD, OB_MYSQL_CLIENT_VERSION_KEY, LIBOBCLIENT_VERSION);
 
   caplob |= OBCLIENT_CAP_SUPPORT_JDBC_BINARY_DOUBLE;
@@ -2277,15 +2281,17 @@ ma_set_connect_attrs_extend(MYSQL *mysql)
 
   rc= mysql_options(mysql, MYSQL_OPT_CONNECT_ATTR_DELETE, "__client_ip") +
       mysql_options(mysql, MYSQL_OPT_CONNECT_ATTR_DELETE, "__client_port");
-     
-  if (get_local_ip_port(mysql->net.fd, ip_buffer, 100, &port)) {
-    snprintf(port_buffer, 10, "%d", port);
-  } else {
-    snprintf(ip_buffer, 100, "%s", "invalid");
-    snprintf(port_buffer, 10, "%s", "invalid");
+  
+  if (!mysql->options.close_attr_obclient_ip) {
+    if (get_local_ip_port(mysql->net.fd, ip_buffer, 100, &port)) {
+      snprintf(port_buffer, 10, "%d", port);
+    } else {
+      snprintf(ip_buffer, 100, "%s", "invalid");
+      snprintf(port_buffer, 10, "%s", "invalid");
+    }
+    rc+= mysql_optionsv(mysql, MYSQL_OPT_CONNECT_ATTR_ADD, "__client_ip", ip_buffer);
+    rc+= mysql_optionsv(mysql, MYSQL_OPT_CONNECT_ATTR_ADD, "__client_port", port_buffer);
   }
-  rc+= mysql_optionsv(mysql, MYSQL_OPT_CONNECT_ATTR_ADD, "__client_ip", ip_buffer);
-  rc+= mysql_optionsv(mysql, MYSQL_OPT_CONNECT_ATTR_ADD, "__client_port", port_buffer);
 
   rc += ma_set_ob_connect_attrs(mysql);
 
@@ -2498,6 +2504,22 @@ static my_bool set_nls_format(MYSQL *mysql)
   return bret;
 }
 
+static my_bool set_wait_timeout(MYSQL* mysql) {
+  my_bool bret = TRUE;
+  char* tmp = getenv("OBCLIENT_WAIT_TIMEOUT");
+  if (bret && tmp) {
+    char str[100] = { 0 };
+    int timeout = atoi(tmp);
+    if (timeout > 28800) {
+      snprintf(str, sizeof(str), "set interactive_timeout=%d, wait_timeout=%d", timeout, timeout);
+      if (mysql_query(mysql, str)) {
+        bret = FALSE;
+      }
+    }
+  }
+  return bret;
+}
+
 MYSQL *mthd_my_real_connect(MYSQL *mysql, const char *host, const char *user,
 		   const char *passwd, const char *db,
 		   uint port, const char *unix_socket, unsigned long client_flag)
@@ -2511,6 +2533,7 @@ MYSQL *mthd_my_real_connect(MYSQL *mysql, const char *host, const char *user,
   const char *scramble_plugin;
   uint pkt_length, scramble_len, pkt_scramble_len= 0;
   NET	*net= &mysql->net;
+  int dump[3] = { -1, -1, -1 };
 
   if (!mysql->methods)
     mysql->methods= &MARIADB_DEFAULT_METHODS;
@@ -2625,12 +2648,36 @@ MYSQL *mthd_my_real_connect(MYSQL *mysql, const char *host, const char *user,
   if (!(pvio= ma_pvio_init(&cinfo)))
     goto error;
 
+#ifndef WIN32
+  //socket fd > 3, skip 0/1/2, Preventing redirection
+  dump[0] = open("/dev/null", O_WRONLY);
+  if(dump[0] < 3)
+    dump[1] = open("/dev/null", O_WRONLY);
+  if (dump[0] < 3 && dump[1] < 3)
+    dump[2] = open("/dev/null", O_WRONLY);
+  if (dump[0] < 3 && dump[1] < 3 && dump[2] < 3) {
+    my_set_error(mysql, CR_SOCKET_CREATE_ERROR, SQLSTATE_UNKNOWN, "Preventing redirection error.");
+    goto error;
+  }
+#endif
+
   /* try to connect */
   if (ma_pvio_connect(pvio, &cinfo) != 0)
   {
+#ifndef WIN32
+    if (dump[0] >= 0)close(dump[0]); 
+    if (dump[1] >= 0)close(dump[1]); 
+    if (dump[2] >= 0)close(dump[2]);
+#endif
     ma_pvio_close(pvio);
     goto error;
   }
+
+#ifndef WIN32
+  if (dump[0] >= 0)close(dump[0]);
+  if (dump[1] >= 0)close(dump[1]);
+  if (dump[2] >= 0)close(dump[2]);
+#endif
 
   //socket5
   if (mysql->is_socket5)
@@ -2885,6 +2932,11 @@ MYSQL *mthd_my_real_connect(MYSQL *mysql, const char *host, const char *user,
   }
 
   if (!set_nls_format(mysql)) {
+    // goto error;
+    // do nothing
+  }
+
+  if (!set_wait_timeout(mysql)) {
     // goto error;
     // do nothing
   }
@@ -4424,6 +4476,13 @@ mysql_optionsv(MYSQL *mysql,enum mysql_option option, ...)
     break;
   case OB_OPT_PROXY_USER:
     OPT_SET_VALUE_STR(&mysql->options, proxy_user, arg1);
+    break;
+  case OB_OPT_CLOSE_ATTR_OBCLIENT_NAME:
+    mysql->options.close_attr_obclient_name = *(my_bool *)arg1;
+    break;
+  case OB_OPT_CLOSE_ATTR_OBCLIENT_IP:
+    mysql->options.close_attr_obclient_ip = *(my_bool *)arg1;
+    break;
   case MARIADB_OPT_HOST:
     OPT_SET_VALUE_STR(&mysql->options, host, arg1);
     break;

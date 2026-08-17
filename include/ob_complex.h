@@ -75,11 +75,11 @@ typedef struct st_complex_type {
 typedef struct st_child_type {
   enum_types type;
   COMPLEX_TYPE *object;
-  //int attr_length;
-  //int attr_precision;
-  //int attr_scale;
-  //int attr_upper_bound;
-  //unsigned char attr_name[128];
+  int attr_length;
+  int attr_precision;
+  int attr_scale;
+  int attr_upper_bound;
+  char attr_name[128];
 } CHILD_TYPE;
 
 typedef struct st_complex_type_object {

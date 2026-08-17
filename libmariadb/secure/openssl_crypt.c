@@ -38,6 +38,8 @@ static const EVP_MD *ma_hash_get_algorithm(unsigned int alg)
     return EVP_sha512();
   case MA_HASH_RIPEMD160:
     return EVP_ripemd160();
+  case MA_HASH_SM3:
+    return EVP_sm3();
   default:
     return NULL;
   }

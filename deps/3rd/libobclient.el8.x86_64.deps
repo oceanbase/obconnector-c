@@ -4,4 +4,4 @@ arch=x86_64
 repo=https://mirrors.aliyun.com/oceanbase/development-kit/el/8/x86_64/
 
 [deps]
-devdeps-openssl-static-1.0.1e-3.el8.x86_64.rpm
+devdeps-openssl-static-1.1.1u-22023100710.el8.x86_64.rpm
