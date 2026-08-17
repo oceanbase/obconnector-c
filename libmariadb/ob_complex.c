@@ -383,14 +383,22 @@ parser_complex(MYSQL_RES *result, OB_HASH *hash)
         }
 
         parent_object->child[atoi(cur[ATTR_NO_INDEX]) - 1].type = child_type;
-        //parent_object->child[atoi(cur[ATTR_NO_INDEX]) - 1].attr_length = atoi(cur[ATTR_LENGTH_INDEX]);
-        //parent_object->child[atoi(cur[ATTR_NO_INDEX]) - 1].attr_precision = atoi(cur[ATTR_PRECISION_INDEX]);
-        //parent_object->child[atoi(cur[ATTR_NO_INDEX]) - 1].attr_scale = atoi(cur[ATTR_SCALE_INDEX]);
-        //parent_object->child[atoi(cur[ATTR_NO_INDEX]) - 1].attr_upper_bound = atoi(cur[ATTR_UPPER_BOUND_INDEX]);
-        //if (cur[ATTR_NAME_INDEX]) {
-        //  int length = strlen(cur[ATTR_NAME_INDEX]);
-        //  memcpy(parent_object->child[atoi(cur[ATTR_NO_INDEX]) - 1].attr_name, cur[ATTR_NAME_INDEX], length);
-        //}
+        if (cur[ATTR_LENGTH_INDEX]) {
+          parent_object->child[atoi(cur[ATTR_NO_INDEX]) - 1].attr_length = atoi(cur[ATTR_LENGTH_INDEX]);
+        }
+        if (cur[ATTR_PRECISION_INDEX]) {
+          parent_object->child[atoi(cur[ATTR_NO_INDEX]) - 1].attr_precision = atoi(cur[ATTR_PRECISION_INDEX]);
+        }
+        if (cur[ATTR_SCALE_INDEX]) {
+          parent_object->child[atoi(cur[ATTR_NO_INDEX]) - 1].attr_scale = atoi(cur[ATTR_SCALE_INDEX]);
+        }
+        if (cur[ATTR_UPPER_BOUND_INDEX]) {
+          parent_object->child[atoi(cur[ATTR_NO_INDEX]) - 1].attr_upper_bound = atoi(cur[ATTR_UPPER_BOUND_INDEX]);
+        }
+        if (cur[ATTR_NAME_INDEX]) {
+          int length = strlen(cur[ATTR_NAME_INDEX]);
+          memcpy(parent_object->child[atoi(cur[ATTR_NO_INDEX]) - 1].attr_name, cur[ATTR_NAME_INDEX], length);
+        }
 
         if (TYPE_COLLECTION == child_type || TYPE_OBJECT == child_type) {
           complex_type = (COMPLEX_TYPE *)hash_search(hash,
@@ -413,14 +421,22 @@ parser_complex(MYSQL_RES *result, OB_HASH *hash)
         parent_collection = (COMPLEX_TYPE_COLLECTION *)parent;
 
         parent_collection->child.type = child_type;
-        //parent_collection->child.attr_length = atoi(cur[ATTR_LENGTH_INDEX]);
-        //parent_collection->child.attr_precision = atoi(cur[ATTR_PRECISION_INDEX]);
-        //parent_collection->child.attr_scale = atoi(cur[ATTR_SCALE_INDEX]);
-        //parent_collection->child.attr_upper_bound = atoi(cur[ATTR_UPPER_BOUND_INDEX]);
-        //if (cur[ATTR_NAME_INDEX]) {
-        //  int length = strlen(cur[ATTR_NAME_INDEX]);
-        //  memcpy(parent_collection->child.attr_name, cur[ATTR_NAME_INDEX], length);
-        //}
+        if(cur[ATTR_LENGTH_INDEX]) {
+          parent_collection->child.attr_length = atoi(cur[ATTR_LENGTH_INDEX]);
+        }
+        if (cur[ATTR_PRECISION_INDEX]) {
+          parent_collection->child.attr_precision = atoi(cur[ATTR_PRECISION_INDEX]);
+        }
+        if (cur[ATTR_SCALE_INDEX]) {
+          parent_collection->child.attr_scale = atoi(cur[ATTR_SCALE_INDEX]);
+        }
+        if (cur[ATTR_UPPER_BOUND_INDEX]) {
+          parent_collection->child.attr_upper_bound = atoi(cur[ATTR_UPPER_BOUND_INDEX]);
+        }
+        if (cur[ATTR_NAME_INDEX]) {
+          int length = strlen(cur[ATTR_NAME_INDEX]);
+          memcpy(parent_collection->child.attr_name, cur[ATTR_NAME_INDEX], length);
+        }
 
         if (TYPE_COLLECTION == child_type || TYPE_OBJECT == child_type) {
           complex_type = (COMPLEX_TYPE *)hash_search(hash,

@@ -1566,8 +1566,8 @@ static void fetch_result_str_complex(MYSQL_COMPLEX_BIND_STRING *header,
                                      MYSQL_BIND *param,
                                      uchar **row)
 {
-  void *buffer;
-  ulong length;
+  void *buffer = NULL;
+  ulong length = 0;
 
   length = net_field_length(row);
 
@@ -1587,7 +1587,7 @@ static void fetch_result_long_complex(MYSQL_COMPLEX_BIND_BASIC *header,
                                      MYSQL_BIND *param,
                                      uchar **row)
 {
-  void *buffer;
+  void *buffer = NULL;
 
   buffer = fetch_result_complex_alloc_space((MYSQL_COMPLEX_BIND_HEADER *)header, param, 4);
   if (NULL == buffer) {

@@ -31,6 +31,7 @@
 #define MA_HASH_SHA384    5
 #define MA_HASH_SHA512    6
 #define MA_HASH_RIPEMD160 7
+#define MA_HASH_SM3       8
 
 /*! Hash digest sizes */
 #define MA_MD5_HASH_SIZE 16
@@ -40,6 +41,7 @@
 #define MA_SHA384_HASH_SIZE 48
 #define MA_SHA512_HASH_SIZE 64
 #define MA_RIPEMD160_HASH_SIZE 20
+#define MA_SM3_HASH_SIZE 32
 
 #define MA_MAX_HASH_SIZE 64
 /** \typedef MRL hash context */
@@ -53,6 +55,7 @@ typedef struct {
   BCRYPT_HASH_HANDLE hHash;
   PBYTE hashObject;
   DWORD digest_len;
+  unsigned int algorithm;
 } MA_HASH_CTX;
 #elif defined(HAVE_OPENSSL)
 typedef void MA_HASH_CTX;
@@ -60,6 +63,7 @@ typedef void MA_HASH_CTX;
 typedef struct {
   void *ctx;
   const struct nettle_hash *hash;
+  unsigned int algorithm;
 } MA_HASH_CTX;
 #endif
 
@@ -132,6 +136,8 @@ static inline size_t ma_hash_digest_size(unsigned int hash_alg)
     return MA_SHA512_HASH_SIZE;
   case MA_HASH_RIPEMD160:
     return MA_RIPEMD160_HASH_SIZE;
+  case MA_HASH_SM3:
+    return MA_SM3_HASH_SIZE;
   default:
     return 0;
   }

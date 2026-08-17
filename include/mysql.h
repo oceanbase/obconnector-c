@@ -290,7 +290,9 @@ extern const char *SQLSTATE_UNKNOWN;
     MARIADB_OPT_INTERACTIVE,
     MARIADB_OPT_PROXY_HEADER,
     MARIADB_OPT_IO_WAIT,
-    OB_OPT_PROXY_USER = 8000  /*ob option start 8000*/
+    OB_OPT_PROXY_USER = 8000,  /*ob option start 8000*/
+    OB_OPT_CLOSE_ATTR_OBCLIENT_NAME,
+    OB_OPT_CLOSE_ATTR_OBCLIENT_IP
   };
 
   enum mariadb_value {
@@ -368,6 +370,8 @@ struct st_mysql_options {
     char *bind_address;
     my_bool secure_auth;
     my_bool report_data_truncation; 
+    my_bool close_attr_obclient_ip;
+    my_bool close_attr_obclient_name;
     /* function pointers for local infile support */
     int (*local_infile_init)(void **, const char *, void *);
     int (*local_infile_read)(void *, char *, unsigned int);
@@ -429,6 +433,8 @@ struct st_mysql_options {
     char socket5_authtype;
     char *socket5_host, *socket5_user, *socket5_pwd;
     int socket5_port;
+    char *reserved_1;
+    char reserved_2[64];
 } MYSQL;
 
 /**

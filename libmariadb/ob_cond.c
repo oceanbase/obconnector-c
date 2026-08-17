@@ -157,7 +157,7 @@ int ob_cond_timedwait_us(ob_cond_t *cond, ob_mutex_t *mutex, unsigned long long 
   abs_time = wait_us + (tv.tv_sec * 1000000 + tv.tv_usec);
   ts.tv_sec = abs_time / 1000000;
   ts.tv_nsec = (abs_time % 1000000) * 1000;
-  return pthread_cond_timedwait(cond, mutex, &tv);
+  return pthread_cond_timedwait(cond, mutex, &ts);
 }
 
 #endif
